@@ -58,10 +58,7 @@ XCode помогает исправлять проблемы с профилям
 
 Когда разработчик подключается к команде, ему нужно только установить профили и сертификаты, которые можно найти в репозитории. Это упрощает работу в большой команде. 
 
-## What’s next?
-
-When a developer joins the team, they need only to install the profiles and certificates that are inside of the repository along side of the code to perform all of the debugging and build functions for the project. This makes life much easier for a larger team.
-
+## Далее
 В [следующей статье]({% post_url 2017-08-30-ios-provisioning-part-2 %}) рассказывается о том как создавать сертификаты/профили, как их устанавливать в XCode и работать с несколькими схемами в XCode.
 
 
