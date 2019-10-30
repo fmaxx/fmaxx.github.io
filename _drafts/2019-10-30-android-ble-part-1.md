@@ -2,16 +2,29 @@
 layout:     post
 title:      Android, работа с BLE - часть 1.
 date:       2019-10-28 10:00:00
-summary:    Управление профилями и сертификатами.
-categories: ios provisioning
+summary:    Разбираемся с Android Bluetooth Low Energy.
+categories: Android, BLE, Bluetooth Low Energy
 ---
 
-Перевод статьи [DEMYSTIFYING IOS PROVISIONING PART 2: CREATING AND ASSIGNING CERTIFICATES AND PROFILES](http://martiancraft.com/blog/2017/07/demystifying-provisioning-part2/)
+Перевод статьи [Making Android BLE work — part 1](https://medium.com/@martijn.van.welie/making-android-ble-work-part-1-a736dcd53b02).
 
-[Перевод первой части здесь]({% post_url 2017-08-20-ios-provisioning-part-1 %})
+В последний год я изучил как разрабатывать Bluetooth Low Energy (BLE) приложения под iOS и это оказалось довольно простым. Далее было портирование этого на Android... насколько это будет сложно?
 
-Разрушая мифы iOS Provisioning, часть 2: управление сертификатами и профилями.
+![devices](/images/2019-10-30-android-ble-part-1/1.jpg)
+
+Могу точно сказать это было сложней чем я представлял, пришлось приложить немало усилий для стабильной работы под Android. Я изучил много статей в свободном доступе, некоторые оказались ошибочными, многие были очень полезными и помогли в деле.
+В этой серии статей я хочу описать свои выводы, чтобы вы не тратили уйму часов на поиски, как мне.
+
+
+Почему BLE на Android работает так?
 ==================
+
+Оглядываясь назад, основные причины это:
+
+* **Google документация по BLE очень общая**, в некоторых случаях нет важной информации или она устарела, примеры приложений не показывают как правильно использовать BLE. Я обнаружил лишь несколько источников, как правильно сделать BLE. 
+[Презентация Stuart Kent](https://www.stkent.com/2017/09/18/ble-on-android.html){:target="_blank"} дает замечательный материал для старта. Для некоторые продвинутых тем есть очень хорошая статья [Nordic](https://fmaxx.github.io/files/2604.BLE_on_Android_v1.0.1.pdf).
+
+
 
 В [первой части]({% post_url 2017-08-20-ios-provisioning-part-1 %}) этой статьи мы узнали что такое сертификаты и профили, как они используются в разработке под платформу Apple. Во второй части статьи мы обсудим как создать все нужное для подписи приложения в личном кабинете разработчика на сайте Apple и как это подключить в Xcode.
 
