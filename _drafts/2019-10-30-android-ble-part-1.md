@@ -7,156 +7,165 @@ categories: Android, BLE, Bluetooth Low Energy
 ---
 
 Перевод статьи [Making Android BLE work — part 1](https://medium.com/@martijn.van.welie/making-android-ble-work-part-1-a736dcd53b02).
+> внимание: в цикле статей используется минимальная версия - Android 6
 
 В последний год я изучил как разрабатывать Bluetooth Low Energy (BLE) приложения под iOS и это оказалось довольно простым. Далее было портирование этого на Android... насколько это будет сложно?
 
 ![devices](/images/2019-10-30-android-ble-part-1/1.jpg)
 
-Могу точно сказать это было сложней чем я представлял, пришлось приложить немало усилий для стабильной работы под Android. Я изучил много статей в свободном доступе, некоторые оказались ошибочными, многие были очень полезными и помогли в деле.
-В этой серии статей я хочу описать свои выводы, чтобы вы не тратили уйму часов на поиски, как мне.
+Могу точно сказать это было сложней, чем я представлял, пришлось приложить немало усилий для стабильной работы под Android. Я изучил много статей в свободном доступе, некоторые оказались ошибочными, многие были очень полезными и помогли в деле.
+В этой серии статей я хочу описать свои выводы, чтобы вы не тратили уйму времени на поиски, как я.
 
 
-Почему BLE на Android работает так?
-==================
+## Почему BLE на Android работает так?
 
 Оглядываясь назад, основные причины это:
 
 * **Google документация по BLE очень общая**, в некоторых случаях нет важной информации или она устарела, примеры приложений не показывают как правильно использовать BLE. Я обнаружил лишь несколько источников, как правильно сделать BLE. 
-[Презентация Stuart Kent](https://www.stkent.com/2017/09/18/ble-on-android.html){:target="_blank"} дает замечательный материал для старта. Для некоторые продвинутых тем есть очень хорошая статья [Nordic](https://fmaxx.github.io/files/2604.BLE_on_Android_v1.0.1.pdf).
+[Презентация Stuart Kent](https://www.stkent.com/2017/09/18/ble-on-android.html){:target="_blank"} дает замечательный материал для старта. Для некоторых продвинутых тем есть хорошая статья [Nordic](https://devzone.nordicsemi.com/cfs-file/__key/communityserver-blogs-components-weblogfiles/00-00-00-00-04-DZ-1046/2604.BLE_5F00_on_5F00_Android_5F00_v1.0.1.pdf){:target="_blank"}.
 
 
+* **Android BLE API это низкоуровневые операции**, в реальных приложениях нужно использовать несколько слоев абстракции (как например сделано "из коробки" в iOS-CoreBluetooth). Обычно нужно самостоятельно сделать: очередь команд, bonding, обслуживание соединений, обработка ошибок и багов, мультипоточный доступ . Самые известные библиотеки: [SweetBlue](https://github.com/iDevicesInc/SweetBlue){:target="_blank"}, [RxAndroidBle](https://github.com/Polidea/RxAndroidBle){:target="_blank"} и [Nordic](https://github.com/NordicSemiconductor/Android-BLE-Library){:target="_blank"}. На мой взгляд самая легкая для изучения - Nordic, [см. детали тут](https://github.com/weliem/blessed-android){:target="_blank"}.
 
-В [первой части]({% post_url 2017-08-20-ios-provisioning-part-1 %}) этой статьи мы узнали что такое сертификаты и профили, как они используются в разработке под платформу Apple. Во второй части статьи мы обсудим как создать все нужное для подписи приложения в личном кабинете разработчика на сайте Apple и как это подключить в Xcode.
+* **Производители делают изменения в Android BLE стеке** или полностью заменяют на свою реализацию. И надо учитывать разницу поведения для разных устройств в приложении. То что прекрасно работает на одном телефоне, может не работать на других! В целом не все так плохо, например реализация Samsung сделана лучше собственной реализации от Google!
 
-Наши задачи:
+* **В Android есть несколько известных (и неизвестных) багов** которые должны быть обработаны, особенно в версиях 4,5 и 6. Более поздние версии работают намного лучше, но тоже имеют определенные проблемы, такие как случайные сбои соединения с ошибкой 133. Подробнее об этом ниже.
 
-* создать App ID
-* сгенерировать *development* and *App Store* сертификаты
-* создать *development* и *distribution* provisioning профили
-* создать схему (назовем ее *App Store*) в Xcode проекте
-* настроить сертификаты и профили в схеме
+Не претендую на то, что я решил все проблемы, но мне удалось выйти на "приемлемый" уровень. Начнем со сканирования.
 
-Многие задачи выполняются в разделе Provisioning в личном кабинете разработчика на сайте [Apple Developer](http://developer.apple.com).
-![Provisioning](/images/2017-08-30-ios-provisioning-part-2/1.png)
 
-Если у вас уже есть оплаченный аккаунт, откройте [Apple Developer website](http://developer.apple.com), выберете "Account" -> "Certificates, Identifiers & Profiles."
+## Сканирование устройств
+Перед подключением к устройству вам нужно его просканировать. Это делается при помощи класса [`BluetoothLeScanner`](https://developer.android.com/reference/android/bluetooth/le/BluetoothLeScanner){:target="_blank"}:
 
-## Создание App IDs
-App ID это уникальный идентификатор для регистрации вашего приложения. Первым делом, давайте создадим его.
-![App IDs](/images/2017-08-30-ios-provisioning-part-2/2.png)
+{% highlight java %}
+BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+BluetoothLeScanner scanner = adapter.getBluetoothLeScanner();
 
-Шаги для регистрации на сайте apple разрабочика:
-1. Выберите "App IDs" под вкладкой "Identifiers" 
-2. Нажмите “+” вверху списка
-3. Введите имя для App ID (используйте название приложения или название + дополнительное имя)
-4. Выберите “Explicit App ID” и введите ваш Bundle ID в текстовое поле
-5. Под “App Services” раздела, выберите сервисы нужные для вашего приложения (их можно будет отредактировать позже)
-6. Нажимаем “Continue”
-7. Если все хорошо - выбираем “Register”
+if (scanner != null) {
+    scanner.startScan(filters, scanSettings, scanCallback);
+    Log.d(TAG, "scan started");
+}  else {
+    Log.e(TAG, "could not get scanner object");
+}
+{% endhighlight %}
 
-Это все. Bundle ID зарегистрирован и можно генерировать профили на основе этого ID. Если в будущем вы измените Bundle ID, придется также удалить App ID (если он не будет использоваться) и пересоздать новый App ID.
+Сканер пытается обнаружить устройства в соответствии с `filters` и `scanSettings` и при нахождении устройства вызывается `scanCallback`:
 
-Так, а в чем тогда разница между App ID и Bundle ID? В общем App ID это уникальный идентификатор приложения в экосистеме App Store, не может быть двух приложений там с одинаковыми App ID. Bunlde ID это идентификатор учетной записи разработчика (используется обратная доменная запись - com.mysite.appname).
+{% highlight java %}
+private final ScanCallback scanCallback = new ScanCallback() {
+    @Override
+    public void onScanResult(int callbackType, ScanResult result) {
+        BluetoothDevice device = result.getDevice();
+        // ...do whatever you want with this found device
+    }
 
-## Создание сертификатов
-Я расскажу вам как создавать сертификат для App Store (другие сертификаты созадаются аналогично). Сертификат можно использовать для разработки и распространения всех ваших приложений.
+    @Override
+    public void onBatchScanResults(List<ScanResult> results) {
+        // Ignore for now
+    }
 
-Первое - нужно создать *Certificate Signing Request (CSR)* в личном кабинете разработчика, для этого:
+    @Override
+    public void onScanFailed(int errorCode) {
+        // Ignore for now
+    }
+};
+{% endhighlight %}
 
-1. на вашем Mac откройте *Keychain Access* (находится тут - /Applications/Utilities).
-2. далее в Keychain Access > Certificate Assistant > Request a Certificate From a Certificate Authority.
-3. в окне введите ваш email и имя, затем выберите "Save to disk" в опции "Request is".
-4. жмите Contunue и сохраните файл на компьютере Mac.
-![Certificate Signing Request](/images/2017-08-30-ios-provisioning-part-2/3.png)
+В результате сканирования `ScanResult` есть объект `BluetoothDevice`, его используют для подключения к устройству. Прежде чем начать подключаться, давайте поговорим о сканировании подробнее, `ScanResult` содержит несколько полезных сведений об устройстве:
+* **Advertisement data** - массив байтов с информацией об устройстве, для большинства устройств это имя и UUIDы сервисов, можно задать в `filters` имя устройства и UUID сервисов для поиска конкретных устройств.
+* **RSSI уровень** - уровень сигнала (насколько близко устройство). 
+* ... дополнительные данные, см. документацию по `ScanResult` [здесь](https://developer.android.com/reference/android/net/wifi/ScanResult)c
 
-Теперь у на есть CSR, и мы готовы сгенерировать рабочий сертификат, для этого заходим в личный кабинет и:
-1. идем в раздел Certificates, Identifiers & Profiles > Certificates > All
-2. нажимаем "+" чтобы создать новый сертификат
-3. выбираем “iOS App Development” для создания development сертификата для отладки на зарегистрированных устройствах
-4. Continue
-5. дальше будут инструкции как сгенерировать CSR (мы уже это сделали!)
-6. загрузите запрос CSR (инструкции прилагаются)
-7. жмем на Download для загрузки сгенерированного сертификата, после этого двойным кликом мышки добавляем его в Keychain Access
-![certificate](/images/2017-08-30-ios-provisioning-part-2/4.png) 
+> Не забывайте про жизненный цикл `Activity`, `onScanResult` может вызываться многократно для одних и тех же устройств, при пересоздании `Activity` сканирование может запускаться повторно, вызываю лавину `onScanResult`.
 
-Для проверки что сертификат установлен в системе, зайдите в Keychain Access > Login Keychain > Certificate, вы должны увидеть публичный и приватные ключи с префиксом "iPhone Developer" (это значит что сертификат для подписки ios приложений, у сертификатов для Mac приложений будет - "Mac development").
+## Настраиваем фильтр для сканирования
+Вообще можно передать null вместо фильтров и получить все устройства рядом, иногда это полезно, но чаще требуются устройства с определенным именем или набором UUID сервисов.
 
-"App Store and Ad Hoc" сертификаты создаются аналогично (разница в п.3 только), сертификат действителен один год, по окончании срока его нужно удалить и создать новый, при этом все связанные provisioning профили аннулируются и их также придется повторно сгенерировать.
+# Сканирование устройств по UUID сервиса
+Это используется если вам необходимо найти устройства определенной категории, например мониторы артериального давления со стандартным сервисным UUID: 1810. При сканировании устройство может содержать в *Advertisement data* UUID сервис, который характеризует это устройство. На самом деле эти данные не надежные, фактически сервисы могут не поддерживаться, или подделываеться *Advertisement data* данные, в общем тут есть творческий момент.
+> Прим. перевочика: одно из моих устройств со специфичной прошивкой, вообще не содержало список UUID сервисов в *Advertisement data*, хотя все остальные прошивки работали ок.
 
-## Регистрация устройств
-Тестовые устройства для отладки приложений регистрируются в помощью UDID - уникального идентификатора. Он включается в provisioning профили (создадим на следующем шаге), при добавлении/удалении нового устройства нужно повторно сгенерировать provisioning профиль. Поэтому мы сделаем этот шаг первым.
+Пример сканирования службы с артериальным давлением:
+{% highlight java %}
+UUID BLP_SERVICE_UUID = UUID.fromString("00001810-0000-1000-8000-00805f9b34fb");
+UUID[] serviceUUIDs = new UUID[]{BLP_SERVICE_UUID};
+List<ScanFilter> filters = null;
+if(serviceUUIDs != null) {
+    filters = new ArrayList<>();
+    for (UUID serviceUUID : serviceUUIDs) {
+        ScanFilter filter = new ScanFilter.Builder()
+                .setServiceUuid(new ParcelUuid(serviceUUID))
+                .build();
+        filters.add(filter);
+    }
+}
+scanner.startScan(filters, scanSettings, scanCallback);
+{% endhighlight %}
 
-UDID устройства можно найти в iTunes или в Xcode (подключите устройство к Mac запустите Xcode, найдите в  Window > Devices > ваше устройство и скопируйте UDID строку в разделе "Identifier"), это уникальный идентификатор вашего физического устройства.
+Обратите внимание, короткий UUID (например `1810`), называется `16-bit UUID` является частью длинного `128-bit UUID` (в данном случае `00001810-000000-1000-8000-000-00805f9b34fb`). Короткий UUID это BASE_PART длинного UUID, см. спецификацию [здесь](https://www.bluetooth.com/specifications/assigned-numbers/service-discovery){:target="_blank"}
 
-Для регистрации UDID:
-1. идем в Certificates, Identifiers & Profiles > Devices > All (личный кабинет разработчика)
-2. жмем "+" для добавления нового устройства
-3. вводим имя, мы рекомендуем формат для этого "Имя/Тип устройства/Добавлен или Изменен/Дата", удобно для больший команд
-4. вводим UDID
-5. нажимаем "Contunue"
-![UDID](/images/2017-08-30-ios-provisioning-part-2/5.png) 
+# Сканирование устройств по имени
+Поиск устройств использует точное совпадение имени устройства, обычно это применяется в двух случаях:
+- поиск конкретного устройства
+- поиск конкретной модели устройста
+Например мой нагрудный напульсник Polar H7 определяется как "Polar H7 391BBB014", первая часть - "Polar H7" общая для всех таких устройств этой модели, а последняя часть "391BBB014" - уникальный серийный номер. Это очень распространненая практика. Если вы хотите найти все устройства "Polar H7", то фильтр по имени вам не поможет, придется искать подстроку у всех отсканированных устройств в `ScanResult`.
+Пример с поиском **точно** по имени:
+{% highlight java %}
+String[] names = new String[]{"Polar H7 391BB014"};
+List<ScanFilter> filters = null;
+if(names != null) {
+    filters = new ArrayList<>();
+    for (String name : names) {
+        ScanFilter filter = new ScanFilter.Builder()
+                .setDeviceName(name)
+                .build();
+        filters.add(filter);
+    }
+}
+scanner.startScan(filters, scanSettings, scanCallback);
+{% endhighlight %}
 
-Теперь устройство зарегистрировано в вашей учетной записи, также можно добавить его у нескольких разработчиков. После регистрации устройство можно включать в provisioning профиль для запуска приложения на нем.
+# Сканирование устройств по MAC-адресам.
+Обычно применяется для **переподключения** к уже известным устройствам. Обычно мы не знаем MAC-адрес девайса, если не сканировали его раньше, иногда адрес печатается на коробке или на корпусе самого устройства, особенно это касается медицинских приборов. Существует другой способ повторного подключения, но в некоторых случаях придется еще раз сканировать устройство, например при очистке кеша Bluetooth.
 
-## Создание профилей
-Provisionig профиль это ключевой момент для подписи приложения. Он определяет какие устройства имеют право запускать подписанное приложение, указывает на сертификат для подписи приложения, а также какие сервисы будут доступны для приложения на этом устройстве (iCloud, APNs и т.д).
+{% highlight java %}
+String[] peripheralAddresses = new String[]{"01:0A:5C:7D:D0:1A"};
+// Build filters list
+List<ScanFilter> filters = null;
+if (peripheralAddresses != null) {
+    filters = new ArrayList<>();
+    for (String address : peripheralAddresses) {
+        ScanFilter filter = new ScanFilter.Builder()
+                .setDeviceAddress(address)
+                .build();
+        filters.add(filter);
+    }
+}
+scanner.startScan(filters, scanSettings, scanByServiceUUIDCallback);
+{% endhighlight %}
+Вероятно вы уже поняли, что можно комбинировать в фильтре UUID, имя и MAC-адрес устройства. Выглядит неплохо, но на практике я не применял такое. Хотя может быть вам это пригодится?
 
-Создать provision профиль довольно просто в личном кабинете разработчика, для этого:
-1. идем в Certificates, Identifiers & Profiles > Provisioning Profiles > All и видим список созданных профилей
-2. жмем "+" для добавления нового профиля
-3. выбираем из списка "iOS App Development" и жмем на Continue
-4. далее выберите App ID (созданный ранее) и опять Continue
-5. на этом экране вам предлагают выбрать сертификат для подписи профиля, указываем только что созданный сертификат, и жмем Contunue (можно выбрать несколько сертфикатов для профиля, каждый из них может подписать приложение)
-6. на экране "Select Devices" укажите устройства, на которых вы будете запускать приложение
-7. экран "Generate" предлагает дать профилю читаемое имя, в MartianCraft мы обычно используем формат: *[App Name]: [Profile Type] Profile* (например "MartianApp: Development Profile"), жмем по привычке Continue
-8. итак на последнем экране (вы тоже не любите неуместное употребление "крайний"?) можно загрузить созданный профиль. После загрузки перетащите его на иконку Xcode в доке (быстрый способ добавить файл в ~/Library/MobileDevice/Provisioning Profiles, это директория для всех профилей, можно сделать это вручную).
+## Настройка ScanSettings
+ScanSettings объясняют Android как он должен сканировать устройства. Там несколько настроек, которые можно задать, ниже полный пример:
+{% highlight java %}
+ScanSettings scanSettings = new ScanSettings.Builder()
+        .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
+        .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+        .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+        .setNumOfMatches(ScanSettings.MATCH_NUM_ONE_ADVERTISEMENT)
+        .setReportDelay(0L)
+        .build();
+{% endhighlight %}
 
-Для создания *App Store* профиля повторяем весь процесс, но на шаге 3 выбираем "App Store", это профиль для распространия приложений в AppStore, и поэтому в него нельзя добавить устройства.
+Посмотрим, что они обозначают:
 
-Важное замечание, если сертификат связанный с профилем будет отозван, или изменится список устройств для этого профиля, то придется обновить provisioning профиль.
-
-![Provisioning profile details](/images/2017-08-30-ios-provisioning-part-2/6.png) 
-
-Процесс обновления профиля простой: идем в Certificates, Identifiers & Profiles in the provisioning portal > Provisioning Profiles > All, находим нужный профиль и жмем Edit для изменений App ID, настроек сертификата или списка устройств.
-
-## Работа с схемами и сертификатами в Xcode
-Наконец-то у нас есть все для подписи iOS приложения, мы соберем все вместе внутри Xcode и свяжем сертификат и provisioning профиль в особую схему.
-
-По умолчанию, XCode автоматически создает две схемы: Debug и Release. Воспользуемся ими, для Debug схемы мы будем использовать Development профиль и сертификат, для Release - AppStore профиль и сертификат. 
-Открываем "General" вкладку и ищем там "targets" (помним что для этого используем сертификаты добавленные в Keychain и Provisioning profiles это папка в XCode см. выше).
-
-Снимаем галочку "Automatically manage signing", так как мы будем подписывать "самостоятельно". После этого появятся две секции: "Signing (Debug)" и "Signing (Release)."
-![Manual signing](/images/2017-08-30-ios-provisioning-part-2/7.png)
-
-В Signing (Debug) > Provisioning Profile выставляем Development профиль, а в Signing (Release) - AppStore профиль.
-
-Это все что нужно сделать для работы с профилями в "ручном" режиме. Мне кажется не так уж и сложно :) Теперь можно и поработать.
-
-## Частые ошибки и как их исправить
-
-* **Provisioning Profile doesn’t match bundle ID** Это значит что provisioning профиль был сгенерирован с неправильным App ID/Bundle ID и профиль содержит Bundle ID от другого проекта.
-
-* **Code Signing Entitlements file do not match those specified in your provisioning profile** Локальные права не соответствуют профилю (посмотрите Capabilites вкладку). При добавлении сервисов типа iCloud, Keychain они должны быть зарегистрированы в профиле.
-
-* **No Matching Provisioning Profiles Found** случается когда сертификату не имеет связанных профилей для подписи приложений. Проверьте что профиль импортирован в Xcode (можно вручную открыть папку: ~/Library/MobileDevice/Provisioning Profiles), посл этого в личном кабинете убедитесь, что профиль использует необходимый сертификат, в случае необходимости обновите профиль.
-
-Более подробно ошибки описаны на сайте для разработчиков [Apple Developer](https://developer.apple.com/library/content/documentation/IDEs/Conceptual/AppDistributionGuide/Troubleshooting/Troubleshooting.html).
-
-## Сборка и подпись приложения
-С нашими настройками удобно создавать сборки приложения и запускать на зарегистрированных устройствах.
-Для выпуска приложения под AppStore следует выбрать "Generic iOS Device", затем Product > Archive, будет создан архив, подписанный профилем-сертификатом "AppStore Provisioning".
-
-Отправка приложения происходит в Xcode Organizer (Window > Organizer), выбирайте архив для отправки в AppStore и следуйте инструкциям в окне. Не забываем выбрать "Use local signing assets" при выборе команды разработчиков.
-
-## Выводы
-В этих двух статьях мы рассмотрели все этапы provisioning процесса, для новичков это может показаться непростым делом, к счастью это нужно делать только раз в год и для старта нового проекта.
-Все коснулись всех базовых моментов provisioning и сборки приложения, если еще остались вопросы, у Apple есть несколько видео с прошлых WWDCC для более глубокого понимания процесса, ссылки ниже.
-
-## Ссылки на видео
-* [WWDC ’16: “What’s New in Xcode App Signing”](https://developer.apple.com/videos/play/wwdc2016/401/)
-* [WWDC ’14: “Distributing Enterprise Apps”](https://developer.apple.com/videos/play/wwdc2014/705/)
-* [WWDC ’15: “iTunes Connect: Development to Distribution”](https://developer.apple.com/videos/play/wwdc2015/304/)
-* [WWDC ’16: “Introduction to Xcode”](https://developer.apple.com/videos/play/wwdc2016/413/)
+# **ScanMode**
+Безусловно, это самый важный параметр. Определяет метод и время сканирования в Bluetooth стеке. Такая операция требует много энергии и необходим контроль над этим процессом, чтобы не разрядить батарею телефона быстро.
+Есть 4 режима работы, в соответствии с руководством [Nordics](https://devzone.nordicsemi.com/cfs-file/__key/communityserver-blogs-components-weblogfiles/00-00-00-00-04-DZ-1046/2604.BLE_5F00_on_5F00_Android_5F00_v1.0.1.pdf){:target="_blank"}:
+1. `SCAN_MODE_LOW_POWER`.
+2. `SCAN_MODE_BALANCED`.
+3. `SCAN_MODE_LOW_LATENCY`.
+4. `SCAN_MODE_OPPORTUNISTIC`.
 
 Спасибо!
 
