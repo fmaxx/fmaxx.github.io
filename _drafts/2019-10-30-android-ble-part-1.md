@@ -209,7 +209,8 @@ BT-ке, как и любой другой, не существует вечно
 1. Выключение и включение обратно системного переключателя Bluetooth,
 2. Перезагрузка вашего телефона,
 3. Очистка в ручном режиме в настройка телефона.
-Это достаточно болезненный момент для нас как разработчиков, потому что телефон часто перезагружается, включается-выключается самолетный режим. И есть еще различия между производителями телефоном, например на некоторых телефонах Samsung, кеш не очищался при выключении Bluetooth.
+
+Это достаточно сложный момент для разработчиков, потому что телефон часто перезагружается, пользователь может включать-выключать самолетный режим. Есть еще различия между производителями телефонов, например на некоторых телефонах Samsung, кеш не очищался при выключении Bluetooth.
 
 Это значит, что нельзя полагаться на данные об устройстве из BT кеша. Есть небольшой трюк, он поможет узнать закешировано ли устройство или нет:
 
@@ -225,6 +226,60 @@ if(deviceType == BluetoothDevice.DEVICE_TYPE_UNKNOWN) {
 }
 {% endhighlight %}
 Это важно, если нужно подключиться к устройству позже, не сканируя его. Подробнее об этом позже...
+
+# **Непрерывное сканирование?**
+Вообще сканирование не следует делать непрерывно, это очень энергоемкая операция. Пользователи любят, когда батарея их смартфона работает долго. Если вам действительно нужно постоянное сканирование, например при поиске BLE-маячков, выберите настройки сканирования с низким потреблением и ограничивайте время сканирования, например когда приложение находится только на передноем плане (foreground), либо сканируйте с перерывами.
+
+В последнее время Google ограничивает (недокументированно) непрерывное сканирование:
+* c Android  8.1 [сканирование без фильтров блокируется при выключенном экране](https://stackoverflow.com/questions/48077690/ble-scan-is-not-working-when-screen-is-off-on-android-8-1-0){:target="_blank"}. Если у вас нет никаких `ScanFilters`, Android приостановит сканирование, когда экран выключен и продолжит, когда экран снова будет включен. [Комментарии от Google.](https://android.googlesource.com/platform/packages/apps/Bluetooth/+/319aeae6f4ebd13678b4f77375d1804978c4a1e1){:target="_blank"} Это очевидно очередной способ энергосбережения от Google.
+* c Android 7 вы можете сканировать только в течение 30 минут, после чего Android меняет параметры на [`SCAN_MODE_OPPORTUNISTIC`.](https://blog.classycode.com/undocumented-android-7-ble-behavior-changes-d1a9bd87d983){:target="_blank"} Очевидное решение, перезапускать сканирование с периодом менее, чем [30 мин](https://android-review.googlesource.com/c/platform/packages/apps/Bluetooth/+/231662/2/src/com/android/bluetooth/gatt/ScanManager.java){:target="_blank"}. Посмотрите [commit](https://android-review.googlesource.com/c/platform/packages/apps/Bluetooth/+/215844){:target="_blank"} в исходном коде.
+* с Android 7 запуск и останов сканирования более 5 раз за 30 секунд [временно отключает сканирование](https://blog.classycode.com/undocumented-android-7-ble-behavior-changes-d1a9bd87d983){:target="_blank"}.
+
+# **Непрерывное сканирование в фоне**
+Google значительно усложнил сканирование на переднем плане. Для фонового режима вы столкнетесь с еще большими трудностями!
+Новые версии Android имеют лимиты на работу служб в фоновом режиме, обычно после 10 минут работы, фоновый сервис прекращает свою работу принудительно.
+Посмотрите возможные решения этой проблемы:
+* Обсуждение на [StackOverflow](https://stackoverflow.com/questions/51371372/beacon-scanning-in-background-android-o){:target="_blank"}
+* Статья [David Young](http://www.davidgyoungtech.com/2017/08/07/beacon-detection-with-android-8){:target="_blank"}
+
+> Прим. переводчика: я использовал [`Foreground Service`](https://developer.android.com/guide/components/services){:target="_blank"}, потому что после сканирования, будет длительный обмен данными с устройствами в процессе использованя аппы. Один из плюсов этого решения - работает в [`Doze Mode`](https://developer.android.com/training/monitoring-device-state/doze-standby){:target="_blank"}.
+
+# **Проверка разрешений (permissions)**
+Есть еще несколько важных моментов, прежде чем мы закончим статью. Для начала сканирования нужны системные разрешения (permissions):
+
+{% highlight xml %}
+<uses-permission android:name="android.permission.BLUETOOTH" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+{% endhighlight %}
+
+Убедитесь что все разрешения одобрены, или запросите их у пользователя. Разрешение `ACCESS_COARSE_LOCATION` Google считает "опасным" и для него требуется обязательное согласие пользователя.
+
+{% highlight java %}
+private boolean hasPermissions() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        if (getApplicationContext().checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] { Manifest.permission.ACCESS_COARSE_LOCATION }, ACCESS_COARSE_LOCATION_REQUEST);
+            return false;
+        }
+    }
+    return true;
+}
+{% endhighlight %}
+
+После получения всех нужный разрешений, нужно проверить включен Bluetooth, если нет - используйте `Intent` для запуска запроса на включение:
+
+{% highlight java %}
+BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+if (!bluetoothAdapter.isEnabled()) {
+    Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+    startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
+}
+{% endhighlight %}
+
+# **Следующая статья: отключение и включение**
+На данный момент мы рассмотрели сканирование, в следующей статье мы погрузимся глубже в процесс подключения и отключения устройств.
 
 Спасибо!
 
