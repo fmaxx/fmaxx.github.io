@@ -1,7 +1,7 @@
 ---
 layout:     post
 title:      Android, работа с BLE - часть 1.
-date:       2019-11-13 09:00:00
+date:       2019-11-12 09:00:00
 summary:    Разбираемся с Android Bluetooth Low Energy.
 categories: Android BLE BluetoothLowEnergy
 ---
