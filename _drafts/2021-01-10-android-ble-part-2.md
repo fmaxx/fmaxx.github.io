@@ -6,7 +6,7 @@ summary:    Разбираемся с Android Bluetooth Low Energy.
 categories: Android BLE BluetoothLowEnergy
 ---
 
-Перевод статьи [Making Android BLE work — part 2](https://medium.com/@martijn.van.welie/making-android-ble-work-part-2-47a3cdaade07).
+Перевод статьи [Making Android BLE work — part 2](https://medium.com/@martijn.van.welie/making-android-ble-work-part-2-47a3cdaade07){:target="_blank"}.
 > внимание: в цикле статей используется минимальная версия - Android 6
 
 В [предыдущей статье](https://fmaxx.github.io/android/ble/bluetoothlowenergy/2019/11/12/android-ble-part-1.html) мы подробно рассмотрели процесс сканирования. Эта статья - о **подключении**, **отключении** и **обнаружении сервисов** (discovering services).
@@ -14,7 +14,7 @@ categories: Android BLE BluetoothLowEnergy
 ![devices](/images/2021-01-10-android-ble-part-2/1.jpeg)
 
 ## Подключение к устройству
-После удачного сканирования устройства, вы должны подключиться к нему вызывая метод `connectGatt()`. В результате возвращается объект `BluetoothGatt`, который будет использоваться для всех [GATT операций](https://developer.android.com/reference/android/bluetooth/BluetoothGatt), такие как чтение и запись характеристик. Однако будте внимательны, есть две версии метода `connectGatt()`. Поздние версии Android имеют еще несколько вариантов, но нам нужна совместимость с Android-6 и мы рассматриваем только эти две:
+После удачного сканирования устройства, вы должны подключиться к нему вызывая метод `connectGatt()`. В результате возвращается объект `BluetoothGatt`, который будет использоваться для всех [GATT операций](https://developer.android.com/reference/android/bluetooth/BluetoothGatt){:target="_blank"}, такие как чтение и запись характеристик. Однако будте внимательны, есть две версии метода `connectGatt()`. Поздние версии Android имеют еще несколько вариантов, но нам нужна совместимость с Android-6 и мы рассматриваем только эти две:
 
 {% highlight java %}
 BluetoothGatt connectGatt(Context context, boolean autoConnect,
@@ -30,12 +30,37 @@ BluetoothGatt gatt = device.connectGatt(context, false,
     bluetoothGattCallback, TRANSPORT_LE);
 {% endhighlight %}
 
-Первый параметр – `context` приложения.
-Второй параметр – флаг `autoconnect`, показывает делать подключение немедленно (`false`) или нет (`true`). При немедленном подключении (`false`) Android будет пытаться соединиться в течение 30 секунд на большинстве смартфонов, по истечении этого времени придет статус соединения со значением `status_code = 133`. Это не официальная ошибка для таймаута соединения. В исходниках Android этот код фигурирует как `GATT_ERROR`. К сожалению, эту ошибку можно получить и в других случаях. Имейте ввиду, с `autoconnect = false` Android делает соединение только с одним устройстов в одно и то же время (это значит если у вас несколько устройст - подключайте их последовательно, а не паралелльно).
+Первый аргумент – `context` приложения.
+Второй аргумент – флаг `autoconnect`, показывает делать подключение немедленно (`false`) или нет (`true`). При немедленном подключении (`false`) Android будет пытаться соединиться в течение 30 секунд на большинстве смартфонов, по истечении этого времени придет статус соединения со значением `status_code = 133`. Это не официальная ошибка для таймаута соединения. В исходниках Android этот код фигурирует как `GATT_ERROR`. К сожалению, эту ошибку можно получить и в других случаях. Имейте ввиду, с `autoconnect = false` Android делает соединение только с одним устройстов в одно и то же время (это значит если у вас несколько устройств - подключайте их последовательно, а не паралелльно).
+Третий аргумент – функция обратного вызова (callback) `BluetoothGattCallback` для конкретного устройства. Этот колбэк используется для всех связанных с устройством операциях, такие как чтение и запись. Мы рассмотрим это более детально в следующей статье.
 
-The first parameter is the application context that Android simply needs to do a connection.
-The second parameter is the autoconnect parameter and indicates whether you want to connect immediately or not. So using false means ‘connect immediately’ and Android will try to connect for 30 seconds on most phones and then it times out. When a connection times out, you will receive a connection update with status code 133. This is not the official error code for a connection timeout though . It is defined in the google source code as GATT_ERROR. You’ll get this error on other occasions as well unfortunately. Also keep in mind that you can issue only one connect at a time using false, because Android will cancel any other connect with value false, if there is one.
-The next parameter is the BluetoothGattCallback callback you want to use for this device. This is not the same callback as we used for scanning. This callback will be used for all device specific operations like reading and writing. We’ll go into detail about this in the next article.
+# Autoconnect = true
+Если вы установите `autoconnect = true`, Android будет подключаться сам к устройству всякий раз, когда устройство будет обнаружено. Изнутри это работае так: Bluetooth стек сканирует сохраненые устройства и когда увидит одно из них – подключится к нему. Это довольно удобно если вы хотите подключиться к определенному устройству, когда оно становится доступным. Фактически, это предпочтительный способ для переподключения. Вы просто создаете `BluetoothDevice` объект и вызываете `connectGattwith` с `autoconnect = true`.
+
+{% highlight java %}
+BluetoothDevice device = 
+bluetoothAdapter.getRemoteDevice("12:34:56:AA:BB:CC");
+
+BluetoothGatt gatt = 
+device.connectGatt(context, true, bluetoothGattCallback, TRANSPORT_LE);
+{% endhighlight %}
+
+Имейте ввиду этот подход работает только если устройство есть в Bluetooth кеше или устройство было сопряжено (bonding) к этому моменту. Посмотрите мою [предыдущую статью](https://fmaxx.github.io/android/ble/bluetoothlowenergy/2019/11/12/android-ble-part-1.html){:target="_blank"}, где подробно объясняется работа с Bluetooth кешем.
+Однако, при перезагрузке вашего телефона или включении/выключении Bluetooth – кеш очистится и это надо проверять перед подключением с `autoconnect = true`, что действительно раздражает.
+> Autoconnect работает только с закешированными и сопряженными (bonded) устройствами!
+
+Для того чтобы узнать, закешировано устройство можно использовать небольшой трюк. После создания объекта `BluetoothDevice`, вызовите у него `getType`, если результат – `TYPE_UNKNOWN`, значит устройство не закешировано. В этом случае, необходимо просканировать устройство с этим мак-адресом (используя неагрессивный метод сканирования) и после этого можно использовать автоподключение снова.
+
+Android-6 и ниже имеет известный баг, в котором возникает гонка состояний и автоматическое подключение становится обычным (`autoconnect = false`). К счастью, умные ребята из Polidea нашли [решение для этого](https://github.com/Polidea/RxAndroidBle/blob/7663a1ab96605dc26eba378a9e51747ad254b229/rxandroidble/src/main/java/com/polidea/rxandroidble2/internal/util/BleConnectionCompat.java){:target="_blank"}. Настоятельно рекомендуется использовать его, если думаете использовать автоподключение.
+
+Преимущества:
+- работает достаточно хорошо на современных версиях Android (прим. переводчика - от Android-8 и выше);
+- возможность подключаться к нескольким устройствам одновременно;
+
+Недостатки:
+- работает медленнее, если сравнивать сканирование в агрессивном режиме + подключение с `autoconnect = false` (Android в этом случае сканирует в режиме `SCAN_MODE_LOW_POWER`, экономя энергию);
+
+
 
 ## Особенности работы BLE под Android:
 
