@@ -131,6 +131,76 @@ if(status == GATT_SUCCESS) {
 {% endhighlight %}
 Это не последний вариант, мы еще улучшим колбек в этой статье. В любом случае, теперь у нас есть обработка ошибок и обработка успешных операций.
 
+## Состояние bonding (bondState)
+Последний параметр который необходимо учитывать в колбеке `onConnectionStateChange` – это `bondState`, состояние сопряжения (bonding) с устройством. Мы можем получить этот параметр так:
+{% highlight java %}
+int bondstate = device.getBondState();
+{% endhighlight %}
+Состояние bonding может иметь одно из трех значений `BOND_NONE`, `BOND_BONDING` or `BOND_BONDED`. Каждое из них влияет на то, как обрабатывать подключение.
+- `BOND_NONE`, нет проблем, можно вызывать `discoverServices()`;
+- `BOND_BONDING`, устройство в процессе сопряжения, нельзя вызывать `discoverServices()`, так как Bluetooth стек в работе и запуск `discoverServices()` может прервать сопряжение и вызвать ошибку соединения. `discoverServices()` вызываем только после того как пройдет сопряжение (bonding);
+- `BOND_BONDED`, для Android-8 и выше, можно запускать `discoverServices()` без задержки. Для версий 7 и ниже может потребоваться задержка перед вызовом. Eсли ваше устройство имеет **Service Changed Characteristic**, то Bluetooth стек в этот момент еще обрабатывает их и запуск `discoverServices()` без задержки может вызвать ошибку соединения. Добавте 1000-1500мс задержки, конкретное значение зависит от количества характеристик на устройстве. Используйте задержку всегда, если вы не знаете сколько **Service Changed Characteristic** имеет устройство.
+Теперь мы можем учитывать состояние `bondState` вместе с `status` и `newState`:
+{% highlight java %}
+if (status == GATT_SUCCESS) {
+    if (newState == BluetoothProfile.STATE_CONNECTED) {
+        int bondstate = device.getBondState();
+        // Обрабатываем bondState
+        if(bondstate == BOND_NONE || bondstate == BOND_BONDED) {
+            // Подключились к устройству, вызываем discoverServices с задержкой
+            int delayWhenBonded = 0;
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.N) {
+                delayWhenBonded = 1000;
+            }
+            final int delay = bondstate == BOND_BONDED ? delayWhenBonded : 0;
+            discoverServicesRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    Log.d(TAG, String.format(Locale.ENGLISH, "discovering services of '%s' with delay of %d ms", getName(), delay));
+                    boolean result = gatt.discoverServices();
+                    if (!result) {
+                        Log.e(TAG, "discoverServices failed to start");
+                    }
+                    discoverServicesRunnable = null;
+                }
+            };
+            bleHandler.postDelayed(discoverServicesRunnable, delay);
+        } else if (bondstate == BOND_BONDING) {
+            // Bonding в процессе, ждем его окончание
+            Log.i(TAG, "waiting for bonding to complete");
+        }
+....
+{% endhighlight %}
+
+## Обработка ошибок
+После того как мы разобрались с успешными операциями, давайте взглянем на ошибки. Есть ряд ситуаций, которые на самом деле "нормальные", но выдают себя за ошибки.
+- **Устройство отключилось намеренно**. Например, все данные были переданы и больше ему нечего делать. Вы получите статус - 19 (`GATT_CONN_TERMINATE_PEER_USER`); 
+- **Истекло время ожидания соединения  и устройство отключилось само**. В этом случае придет статус - 8 (`GATT_CONN_TIMEOUT`);
+- **Низкоуровневая ошибка соединения, которая привела к отключению**. Обычно это статус - 133 (`GATT_ERROR`) или более конкретный код, если повезет;
+- **Bluetooth стек не смог подключится ни разу**. Здесь также получим статус - 133 (`GATT_ERROR`);
+- **Соединение было потеряно в процессе `bonding` или `discoverServices`**. Необходимо выяснить причину и возможно повторить попытку подключения.
+
+Первые два случая абсолютно нормальные явления и все что нужно сделать - это вызывать `close()` и подчистить ссылки на объект `BluetoothGatt` если необходимо.
+В остальных случаях, либо ваш код, либо устройство, что-то делает не так. Вы возможно захотите уведомить UI или другие части приложения о проблеме, повторить подключение или еще каким-то образом отреагировать на ситуацию.
+Взгляните как я сделал это в [моей библиотеке](https://github.com/weliem/blessed-android/blob/master/blessed/src/main/java/com/welie/blessed/BluetoothPeripheral.java#L234){:target="_blank"}. 
+
+## Статус 133 при подключении (connecting)
+Статус - 133 часто встречается при попытках подключиться к устройству, особенно во время разработки. Этот статус может иметь множество причин, некоторые из них можно контролировать:
+- Убедитесь, что вы всегда вызываете `close()` при отключении. Если этого не сделать, в следущий раз при подключении вы точно получите `status=133`; 
+- Всегда используйте `TRANSPORT_LE` в вызове `connectGatt()`;
+- Перезагрузите смартфон. Возможно Bluetooth стек выбрал лимит по клиентским подключениям или есть внутренняя проблема. (_Прим. переводчика: я сначала выключал/включал Bluetooth, потом Airplane режим и если не помогало - перезагружал_);
+- Проверьте что устройство посылает advertising пакеты. Вызов `connectGatt()` с `autoconnect = false` имеет таймаут 30 секунд, после чего присылает ошибку `status=133`;
+- Замените/зарядите батарею на устройстве. Обычно устройства работают нестабильно при низком заряде;
+
+
+
+
+
+
+
+
+
+
 
 ## Особенности работы BLE под Android:
 
