@@ -20,7 +20,7 @@ categories: Android BLE BluetoothLowEnergy
 
 Первая причина, на самом деле, не является проблемой, такова природа BLE. Асинхронное программирование это распространненая штука, используется например при сетевых вызовах. Однако вторая причина очень раздражает и требует специального подхода.
 
-Ниже кусок кода `BluetoothGatt.java` с блокировкой переменной `mDeviceBusy` перед началом операции чтения:
+Ниже кусок кода `BluetoothGatt.java` с блокировкой переменной `mDeviceBusy`, перед чтением характеристики:
 {% highlight java %}
 public boolean readCharacteristic(BluetoothGattCharacteristic characteristic) {
     if ((characteristic.getProperties() 
@@ -76,6 +76,97 @@ public void onCharacteristicRead(String address,
 ....
 {% endhighlight %}
 
+## Используем очередь
+Выполнять чтение/запись по одной операции за раз неудобно, но любое сложное приложение должно это учитывать. Решение этой проблемы - использовать **очередь команд**. Все BLE библиотеки, которые я ранее упоминал, так или иначе реализуют очередь. Это одна из лучших практик!
+Идея простая – каждая команда сначала добавляется в очередь. Затем команда забирается из очереди на исполнение, после результата, команда помечается как «завершенная» и удаляется из очереди. Запускать команды можно в любое время, но выполняются точно в том порядке, в котором поступают в очередь. Это очень упрощает разработку под BLE. В iOS аналогично работает фреймворк `CoreBluetooth` (_Прим. переводчика: который намного удобнее, чем реализация Bluetooth стека в Android_). 
+
+Очередь создается для каждого объекта `BluetoothGatt`. К счастью, Android сможет обрабатывать очереди от нескольких объектов `BluetoothGatt`, вам не нужно об этом беспокоиться. Есть много способов создать очередь, мы будем использовать простую очередь `Queue` с `Runnable` для каждой команды и переменной `commandQueueBusy` для отслеживания работы команды:
+
+{% highlight java %}
+private Queue<Runnable> commandQueue;
+private boolean commandQueueBusy;
+{% endhighlight %}
+
+Затем мы добавляем новый экземпляр `Runnable` в очередь при добавлении команды. Ниже пример чтения характеристики (readCharacteristic):
+
+{% highlight java %}
+public boolean readCharacteristic(final BluetoothGattCharacteristic characteristic) {
+    if(bluetoothGatt == null) {
+        Log.e(TAG, "ERROR: Gatt is 'null', ignoring read request");
+        return false;
+    }
+
+    // Check if characteristic is valid
+    if(characteristic == null) {
+        Log.e(TAG, "ERROR: Characteristic is 'null', ignoring read request");
+        return false;
+    }
+
+    // Check if this characteristic actually has READ property
+    if((characteristic.getProperties() & PROPERTY_READ) == 0 ) {
+        Log.e(TAG, "ERROR: Characteristic cannot be read");
+        return false;
+    }
+
+    // Enqueue the read command now that all checks have been passed
+    boolean result = commandQueue.add(new Runnable() {
+        @Override
+        public void run() {
+            if(!bluetoothGatt.readCharacteristic(characteristic)) {
+                Log.e(TAG, String.format("ERROR: readCharacteristic failed for characteristic: %s", characteristic.getUuid()));
+                completedCommand();
+            } else {
+                Log.d(TAG, String.format("reading characteristic <%s>", characteristic.getUuid()));
+                nrTries++;
+            }
+        }
+    });
+
+    if(result) {
+        nextCommand();
+    } else {
+        Log.e(TAG, "ERROR: Could not enqueue read characteristic command");
+    }
+    return result;
+}
+{% endhighlight %}
+
+В этом методе сначала проверяем все ли готово для выполнения (наличие и тип характеристики), ошибки логгируются. Внутри `Runnable`, фактически вызывается `readCharacteristic()`, который выдает команду на устройство. Мы также отслеживаем сколько было попыток, часто требуется сделать повтор команды в случае ошибки (_Прим. переводчика: это лучшая тактика, чтобы добиться стабильной работы с устройством_). Если чтение характеристики возвращает `false`, мы логгируем ошибку, «завершаем» команду, чтобы можно было запустить следующую. Наконец вызывается `nextCommand()`, чтобы запустить следующую команду из очереди:
+
+{% highlight java %}
+private void nextCommand() {
+    // If there is still a command being executed then bail out
+    if(commandQueueBusy) {
+        return;
+    }
+
+    // Check if we still have a valid gatt object
+    if (bluetoothGatt == null) {
+        Log.e(TAG, String.format("ERROR: GATT is 'null' for peripheral '%s', clearing command queue", getAddress()));
+        commandQueue.clear();
+        commandQueueBusy = false;
+        return;
+    }
+
+    // Execute the next command in the queue
+    if (commandQueue.size() > 0) {
+        final Runnable bluetoothCommand = commandQueue.peek();
+        commandQueueBusy = true;
+        nrTries = 0;
+
+        bleHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                    try {
+                        bluetoothCommand.run();
+                    } catch (Exception ex) {
+                        Log.e(TAG, String.format("ERROR: Command exception for device '%s'", getName()), ex);
+                    }
+            }
+        });
+    }
+}
+{% endhighlight %}
 
 ## Подключение к устройству
 После удачного сканирования, вы должны подключиться к устройству, вызывая метод `connectGatt()`. В результате мы получаем объект – `BluetoothGatt`, который будет использоваться для всех [GATT операций](https://developer.android.com/reference/android/bluetooth/BluetoothGatt){:target="_blank"}, такие как чтение и запись характеристик. Однако будьте внимательны, есть две версии метода `connectGatt()`. Поздние версии Android имеют еще несколько вариантов, но нам нужна совместимость с Android-6 и мы рассматриваем только эти две:
