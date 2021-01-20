@@ -80,7 +80,7 @@ public void onCharacteristicRead(String address,
 Выполнять чтение/запись по одной операции за раз неудобно, но любое сложное приложение должно это учитывать. Решение этой проблемы - использовать **очередь команд**. Все BLE библиотеки, которые я ранее упоминал, так или иначе реализуют очередь. Это одна из лучших практик!
 Идея простая – каждая команда сначала добавляется в очередь. Затем команда забирается из очереди на исполнение, после результата, команда помечается как «завершенная» и удаляется из очереди. Запускать команды можно в любое время, но выполняются точно в том порядке, в котором поступают в очередь. Это очень упрощает разработку под BLE. В iOS аналогично работает фреймворк `CoreBluetooth` (_Прим. переводчика: который намного удобнее, чем реализация Bluetooth стека в Android_). 
 
-Очередь создается для каждого объекта `BluetoothGatt`. К счастью, Android сможет обрабатывать очереди от нескольких объектов `BluetoothGatt`, вам не нужно об этом беспокоиться. Есть много способов создать очередь, мы будем использовать простую очередь `Queue` с `Runnable` для каждой команды и переменной `commandQueueBusy` для отслеживания работы команды:
+Очередь создается для каждого объекта `BluetoothGatt`. К счастью, Android сможет обрабатывать очереди от нескольких объектов `BluetoothGatt`, вам не нужно об этом беспокоиться (_Прим. переводчика: у меня это не сработало, я использовал глобальную очередь команд для всех устройств_). Есть много способов создать очередь, мы будем использовать простую очередь `Queue` с `Runnable` для каждой команды и переменной `commandQueueBusy` для отслеживания работы команды:
 
 {% highlight java %}
 private Queue<Runnable> commandQueue;
@@ -131,7 +131,7 @@ public boolean readCharacteristic(final BluetoothGattCharacteristic characterist
 }
 {% endhighlight %}
 
-В этом методе сначала проверяем все ли готово для выполнения (наличие и тип характеристики), ошибки логгируются. Внутри `Runnable`, фактически вызывается `readCharacteristic()`, который выдает команду на устройство. Мы также отслеживаем сколько было попыток, часто требуется сделать повтор команды в случае ошибки (_Прим. переводчика: это лучшая тактика, чтобы добиться стабильной работы с устройством_). Если чтение характеристики возвращает `false`, мы логгируем ошибку, «завершаем» команду, чтобы можно было запустить следующую. Наконец вызывается `nextCommand()`, чтобы запустить следующую команду из очереди:
+В этом методе сначала проверяем все ли готово для выполнения (наличие и тип характеристики), ошибки логгируются. Внутри `Runnable`, фактически вызывается `readCharacteristic()`, который выдает команду на устройство. Мы также отслеживаем сколько было попыток, чтобы сделать повтор в случае ошибки (_Прим. переводчика: это лучшая тактика, чтобы добиться стабильной работы с устройством_). Если чтение характеристики возвращает `false`, мы логгируем ошибку, «завершаем» команду, чтобы можно было запустить следующую. Наконец вызывается `nextCommand()`, чтобы запустить следующую команду из очереди:
 
 {% highlight java %}
 private void nextCommand() {
@@ -167,6 +167,125 @@ private void nextCommand() {
     }
 }
 {% endhighlight %}
+
+Обратите внимание, мы используем метод `peek()` для получения объекта `Runnable` из очереди, чтобы можно было повторить запуск позже. Этот метод не удаляет объект из очереди. 
+
+Результат чтения будет отправлен в ваш колбек:
+
+{% highlight java %}
+@Override
+public void onCharacteristicRead(BluetoothGatt gatt, 
+                                final BluetoothGattCharacteristic characteristic, 
+                                int status) {
+    // Perform some checks on the status field
+    if (status != GATT_SUCCESS) {
+        Log.e(TAG, String.format(Locale.ENGLISH,"ERROR: Read failed for characteristic: %s, status %d", characteristic.getUuid(), status));
+        completedCommand();
+        return;
+    }
+
+    // Characteristic has been read so processes it   
+    ...
+    // We done, complete the command
+    completedCommand();
+}
+{% endhighlight %}
+
+Чтобы одновременный вызов другой команды и избежать состояния гонки, мы завершаем команду `completedCommand()` после обработки нового значения. 
+
+Теперь мы готовы завершить команду, убираем `Runnable` из очереди через вызов `poll()` и запускаем следующую из очереди:
+
+{% highlight java %}
+private void completedCommand() {
+    commandQueueBusy = false;
+    isRetrying = false;
+    commandQueue.poll();
+    nextCommand();
+}
+{% endhighlight %}
+
+В некоторых случаях (ошибка, неожиданное значение), вам нужно будет повторить команду. Сделать это просто, так как объект `Runnable` остается в очереди до вызова `completedCommand()`. Чтобы не уйти в бесконечное повторение – проверям лимит на повторы:
+{% highlight java %}
+private void retryCommand() {
+    commandQueueBusy = false;
+    Runnable currentCommand = commandQueue.peek();
+    if(currentCommand != null) {
+        if (nrTries >= MAX_TRIES) {
+            // Max retries reached, give up on this one and proceed
+            Log.v(TAG, "Max number of tries reached");
+            commandQueue.poll();
+        } else {
+            isRetrying = true;
+        }
+    }
+    nextCommand();
+}
+{% endhighlight %}
+
+## Запись характеристик
+Чтение характеристики достаточно простая операция, а запись требует допольнительных пояснений. Для выполнения записи нужно предоставить **характеристику**, **массив байтов** и **тип записи**. Существует несколько типов записи, важные для нас это: 
+- `WRITE_TYPE_DEFAULT` (вы получите ответ от устройства, например, код завершения);
+- `WRITE_TYPE_NO_RESPONSE` (никакого ответа от устройства не будет).
+
+Использовать тот или иной тип зависит от вашего устройства и характеристики (иногда она поддерживает оба типа записи, иногда только один конкретный тип).
+
+В Android каждая характеристика имеет дефолтный тип записи, который определяется при ее создании. Ниже фрагмент кода из исходников Android, где определяется тип:
+
+{% highlight java %}
+...
+if ((mProperties & PROPERTY_WRITE_NO_RESPONSE) != 0) {
+    mWriteType = WRITE_TYPE_NO_RESPONSE;
+} else {
+    mWriteType = WRITE_TYPE_DEFAULT;
+}
+...
+{% endhighlight %}
+
+Как вы видите, это работает нормально, если характеристика поддерживает только один их двух типов записи. Если характеристика поддерживает оба типа, то значение по умолчанию будет `WRITE_TYPE_NO_RESPONSE`. Имейте это ввиду!
+
+Перед записью можно проверить характеристику, поддерживает ли она нужный тип записи:
+{% highlight java %}
+// Check if this characteristic actually supports this writeType
+int writeProperty;
+switch (writeType) {
+    case WRITE_TYPE_DEFAULT: writeProperty = PROPERTY_WRITE; break;
+    case WRITE_TYPE_NO_RESPONSE : writeProperty = PROPERTY_WRITE_NO_RESPONSE; break;
+    case WRITE_TYPE_SIGNED : writeProperty = PROPERTY_SIGNED_WRITE; break;
+    default: writeProperty = 0; break;
+}
+if((characteristic.getProperties() & writeProperty) == 0 ) {
+    Log.e(TAG, String.format(Locale.ENGLISH,"ERROR: Characteristic <%s> does not support writeType '%s'", characteristic.getUuid(), writeTypeToString(writeType)));
+    return false;
+}
+{% endhighlight %}
+
+Я рекомендую всегда явно указывать тип записи и не полагаться на дефолтные настройки выбранные Android! 
+
+Итак, запись массива байтов `bytesToWrite` в характеристику выглядит так: 
+{% highlight java %}
+characteristic.setValue(bytesToWrite);
+characteristic.setWriteType(writeType);
+if (!bluetoothGatt.writeCharacteristic(characteristic)) {
+    Log.e(TAG, String.format("ERROR: writeCharacteristic failed for characteristic: %s", characteristic.getUuid()));
+    completedCommand();
+} else {
+    Log.d(TAG, String.format("writing <%s> to characteristic <%s>", bytes2String(bytesToWrite), characteristic.getUuid()));
+    nrTries++;
+}
+{% endhighlight %}
+
+## Включение/выключение уведомлений
+Кроме самостоятельного чтения и записи характеристик, вы можете включить или отключить уведомления от устройств. При включении уведомления, устройство сообщит вам о появлении новых данных и отправит их автоматически.
+
+Для включения уведомлений вы должны сделать две вещи в Android:
+1. вызвать `setCharacteristicNotification`. Bluetooth стек будет ожидать уведомления для этой характеристики.
+2. записать **1** или **2**  как `unsigned int16` в дескриптор конфигурации характеристик (Client Characteristic Configuration, сокращенно - ССС). Дескриптор CCC имеет короткий UUID **2902**.
+
+
+
+
+
+
 
 ## Подключение к устройству
 После удачного сканирования, вы должны подключиться к устройству, вызывая метод `connectGatt()`. В результате мы получаем объект – `BluetoothGatt`, который будет использоваться для всех [GATT операций](https://developer.android.com/reference/android/bluetooth/BluetoothGatt){:target="_blank"}, такие как чтение и запись характеристик. Однако будьте внимательны, есть две версии метода `connectGatt()`. Поздние версии Android имеют еще несколько вариантов, но нам нужна совместимость с Android-6 и мы рассматриваем только эти две:
