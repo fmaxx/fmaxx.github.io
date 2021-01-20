@@ -283,9 +283,115 @@ if (!bluetoothGatt.writeCharacteristic(characteristic)) {
 
 Почему **1** или **2**? Потому что внутри обмена данными есть Уведомление и Индикация. Полученное Уведомление не подтверждаются стеком Bluetooth, а Индикация наоборот подтверждается стеком. При использовании Индикации, устройство будет точно знать, что данные получены и может их, например, удалить из локального хранилища. С точки зрения Android приложения нет разницы: в обоих случаях вы просто получите массив байтов и Bluetooth стек уведомит устройство об этом, если вы используете Индикацию. Итак, **1** включает уведомления, **2** – индикацию. Чтобы выключить их, записываем **0**. Вы должны самостоятельно определить, что записать в дескриптор CCC.
 
+В iOS метод `setNotify()` делает всю работу за вас. Ниже пример, как сделать тоже самое на Android, там сначала идут проверки входных параметров, определяется что записать в дескриптор и наконец команда отправляется в очередь:
 
+{% highlight java %}
+private final String CCC_DESCRIPTOR_UUID = "00002902-0000-1000-8000-00805f9b34fb";
+public boolean setNotify(BluetoothGattCharacteristic characteristic, 
+                        final boolean enable) {
+    // Check if characteristic is valid
+    if(characteristic == null) {
+        Log.e(TAG, "ERROR: Characteristic is 'null', ignoring setNotify request");
+        return false;
+    }
 
+    // Get the CCC Descriptor for the characteristic
+    final BluetoothGattDescriptor descriptor = characteristic.getDescriptor(UUID.fromString(CCC_DESCRIPTOR_UUID));
+    if(descriptor == null) {
+        Log.e(TAG, String.format("ERROR: Could not get CCC descriptor for characteristic %s", characteristic.getUuid()));
+        return false;
+    }
 
+    // Check if characteristic has NOTIFY or INDICATE properties and set the correct byte value to be written
+    byte[] value;
+    int properties = characteristic.getProperties();
+    if ((properties & PROPERTY_NOTIFY) > 0) {
+        value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE;
+    } else if ((properties & PROPERTY_INDICATE) > 0) {
+        value = BluetoothGattDescriptor.ENABLE_INDICATION_VALUE;
+    } else {
+        Log.e(TAG, String.format("ERROR: Characteristic %s does not have notify or indicate property", characteristic.getUuid()));
+        return false;
+    }
+    final byte[] finalValue = enable ? value : BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE;
+
+    // Queue Runnable to turn on/off the notification now that all checks have been passed
+    boolean result = commandQueue.add(new Runnable() {
+        @Override
+        public void run() {
+            // First set notification for Gatt object  if(!bluetoothGatt.setCharacteristicNotification(descriptor.getCharacteristic(), enable)) {
+                Log.e(TAG, String.format("ERROR: setCharacteristicNotification failed for descriptor: %s", descriptor.getUuid()));
+            }
+
+            // Then write to descriptor
+            descriptor.setValue(finalValue);
+            boolean result;
+            result = bluetoothGatt.writeDescriptor(descriptor);
+            if(!result) {
+                Log.e(TAG, String.format("ERROR: writeDescriptor failed for descriptor: %s", descriptor.getUuid()));
+                completedCommand();
+            } else {
+                nrTries++;
+            }
+        }
+    });
+
+    if(result) {
+        nextCommand();
+    } else {
+        Log.e(TAG, "ERROR: Could not enqueue write command");
+    }
+
+    return result;
+}
+{% endhighlight %}
+
+Результат записи в CCC дескриптор обрабатывается в колбеке `onDescriptorWrite`. Здесь вы должны отличить запись в CCC от записей в другие дескрипторы. Во время обработки колбека, мы также должны хранить какие в данный момент характеристики уведомляются.
+
+{% highlight java %}
+@Override
+public void onDescriptorWrite(BluetoothGatt gatt, 
+                                final BluetoothGattDescriptor descriptor, 
+                                final int status) {
+    // Do some checks first
+    final BluetoothGattCharacteristic parentCharacteristic = descriptor.getCharacteristic();
+    if(status!= GATT_SUCCESS) {
+        Log.e(TAG, String.format("ERROR: Write descriptor failed value <%s>, device: %s, characteristic: %s", bytes2String(currentWriteBytes), getAddress(), parentCharacteristic.getUuid()));
+    }
+
+    // Check if this was the Client Configuration Descriptor  if(descriptor.getUuid().equals(UUID.fromString(CCC_DESCRIPTOR_UUID))) {
+        if(status==GATT_SUCCESS) {
+            // Check if we were turning notify on or off
+            byte[] value = descriptor.getValue();
+            if (value != null) {
+                if (value[0] != 0) {
+                    // Notify set to on, add it to the set of notifying characteristics          notifyingCharacteristics.add(parentCharacteristic.getUuid());
+                    }
+                } else {
+                    // Notify was turned off, so remove it from the set of notifying characteristics               notifyingCharacteristics.remove(parentCharacteristic.getUuid());
+                }
+            }
+        }
+        // This was a setNotify operation
+        ....
+    } else {
+        // This was a normal descriptor write....
+        ...
+        });
+    }
+    completedCommand();
+}
+{% endhighlight %}
+
+Чтобы узнать из какой характеристики пришло уведомление – используйте метод `isNotifying()`:
+
+{% highlight java %}
+public boolean isNotifying(BluetoothGattCharacteristic characteristic) {
+    return notifyingCharacteristics.contains(characteristic.getUuid());
+}
+{% endhighlight %}
+
+## Лимиты на установку уведомлений
 
 
 ## Подключение к устройству
