@@ -23,26 +23,148 @@ categories: Android BLE BluetoothLowEnergy
 - **Пусть Android сам работает с bonding** Andriod сделает bonding за вас, когда устройство скажет, что нужен bonding, или во время операции чтения/записи зашифрованной характеристики. В большинстве случаев не надо вызывать `createBond()` самостоятельно (_Прим. переводчика: мне пришлось это делать самостоятельно, из-за особенностей прошивки устройства. Кроме того, Samsung работает по-другому, чем другие вендоры._);
 - **Нельзя запускать другие операции, в процессе работы bonding.** Если вы будете запускать обнаружение сервисов или читать/писать характеристики, это приведет к ошибками и сбросу соединения. Просто дождитесь пока Android выполнит bonding;
 - **Продолжайте очередь операций после завершения bonding.** Как только операция bonding завершилась, продолжайте выполнение операций из очереди;
-- **Если вы знаете, что делаете и это необходимо** вы можете вызвать `createBond()` для запуска bonding с устройством самостоятельно. Но это должно быть исключением.
+- **Если вы знаете, что делаете, и это необходимо** вы можете вызвать `createBond()` для запуска bonding с устройством самостоятельно. Но это должно быть исключением.
 
 ## Что вызывает bonding?
 
 Есть три причиные, по которым запускается процесс bonding:
 1. При соединении с устройством, оно сигнализирует что требуется bonding, до любых других операций;
 2. **Характеристка может быть «зашифрована» для чтения или записи.** При попытке прочитать или записать такую характеристику, запустится bonding. Если он пройдет удачно чтение/запись также выполнится, в случае ошибки bonding – чтение/запись выполнится с ошибкой `INSUFFICIENT_AUTHENTICATION`. Такая же ошибка есть в iOS.
-3. Вы **запускаете процесс bonding самостоятельно** через вызов `createBond()`. Если это требуется для вашего устройства, оно вероятно не будет совместимо с iOS, так как там нет аналогичного метода. Но формально в протоколе Bluetooth такое возможно.
+3. Вы **запускаете процесс bonding самостоятельно** через вызов `createBond()`. Если этого требует ваше устройство, оно вероятно не будет совместимо с iOS, так как там нет аналогичного метода. Но формально в протоколе Bluetooth такое возможно.
 
 Давайте обсудим каждый случай.
 
+### Bonding во время подключения
+Если устройство требует bonding сразу после подключения, то при вызове колбека `onConnectionStateChange` состояние bonding будет `BOND_BONDING`. Это означает что идет процесс bonding и **вы не должны ничего делать в этот момент**, например вызывать `discoverServices()`, до тех пор пока процесс bonding не закончится! Иначе возможны неожиданные дисконнекты или ошибки обнаружения сервисов. Поэтому следует специально обрабатывать эту ситуацию в `onConnectionStateChanged`:
+
+{% highlight java %}
+// Take action depending on the bond state
+if(bondstate == BOND_NONE || bondstate == BOND_BONDED) {
+    // Connected to device, now proceed to discover it's services
+    ... 
+} else if (bondstate == BOND_BONDING) {
+    // Bonding process has already started let it complete
+    Log.i(TAG, "waiting for bonding to complete");
+}
+{% endhighlight %}
+
+Чтобы следить как идет процесс bonding, необходимо зарегистрировать колбек `BroadcastReceiver` для интента `ACTION_BOND_STATE_CHANGED` до вызова `connectGatt`. Этот колбек будет вызываться несколько раз в процессе bonding.
 
 
+{% highlight java %}
+context.registerReceiver(bondStateReceiver, 
+                        new IntentFilter(ACTION_BOND_STATE_CHANGED));
+private final BroadcastReceiver bondStateReceiver = new BroadcastReceiver() {
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        final String action = intent.getAction();
+        final BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
 
+        // Ignore updates for other devices
+        if (bluetoothGatt == null || !device.getAddress().equals(bluetoothGatt.getDevice().getAddress()))
+            return;
 
+        // Check if action is valid
+        if(action == null) return;
 
+        // Take action depending on new bond state
+        if (action.equals(ACTION_BOND_STATE_CHANGED)) {
+            final int bondState = intent.getIntExtra(EXTRA_BOND_STATE, ERROR);
+            final int previousBondState = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, -1);
 
+            switch (bondState) {
+                case BOND_BONDING:
+                    // Bonding started
+                    ...
+                    break;
+                case BOND_BONDED:
+                    // Bonding succeeded
+                    ...
+                    break;
+                case BOND_NONE:
+                    // Oh oh
+                    ...
+                    break;
+            }
+        }
+    }
+};
+{% endhighlight %}
 
+После завершения bonding, мы запускаем обнаружение сервисов (service discovery), если они еще не обнаружены, это можно проверить:
 
+{% highlight java %}
+case BOND_BONDED:
+    // Bonding succeeded
+    Log.d(TAG, "bonded");
 
+    // Check if there are services
+    if(bluetoothGatt.getServices().isEmpty()) {
+        // No services discovered yet
+        bleHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                Log.d(TAG, String.format("discovering services of '%s'", getName()));
+                boolean result = bluetoothGatt.discoverServices();
+                if (!result) {
+                    Log.e(TAG, "discoverServices failed to start");
+                }
+            }
+        });
+    }
+{% endhighlight %}
+
+Вот и все, что касается особенностей bonding при подключении.
+
+### Bonding при чтении/записи зашифрованных характеристик
+
+Если bonding стартует при чтении/записи зашифрованной характеристики, то самая первая операция чтения/записи окончится с ошибкой `GATT_INSUFFICIENT_AUTHENTICATION`. На версиях Android-6, 7 вы получите эту ошибку в `onCharacteristicRead`/`onCharacteristicWrite`, при этом процесс bonding уже будет запущен внутри Android. С версии Android-8 ошибки не будет и Android самостоятельно повторит операцию после завершения bonding. Получается на Android-6, 7 надо повторить операцию чтения/записи самостоятельно. Итак, вам надо поймать ошибку и сделать повтор операции после bonding.
+
+При получении такой ошибки, не продолжайте запуск операций:
+
+{% highlight java %}
+public void onCharacteristicRead(BluetoothGatt gatt, final BluetoothGattCharacteristic characteristic, int status) {
+    // Perform some checks on the status field
+    if (status != GATT_SUCCESS) {
+        if (status == GATT_INSUFFICIENT_AUTHENTICATION ) {
+            // Characteristic encrypted and needs bonding,
+            // So retry operation after bonding completes
+            // This only happens on Android 5/6/7
+            Log.w(TAG, "read needs bonding, bonding in progress");
+            return;
+        } else {
+            Log.e(TAG, String.format(Locale.ENGLISH,"ERROR: Read failed for characteristic: %s, status %d", characteristic.getUuid(), status));
+            completedCommand();
+            return;
+        }
+    }
+...
+{% endhighlight %}
+
+После bonding проверяем, есть ли операция в процессе выполнения и повторяем ее:
+
+{% highlight java %}
+case BOND_BONDED:
+    // Bonding succeeded
+    Log.d(TAG, "bonded");
+
+    // Check if there are services
+    ...
+    // If bonding was triggered by a read/write, we must retry it
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        if (commandQueueBusy && !manuallyBonding) {
+            bleHandler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    Log.d(TAG, "retrying command after bonding");
+                    retryCommand();
+                }
+            }, 50);
+        }
+    }
+{% endhighlight %}
+
+### Запуск bonding самостоятельно
 
 
 ## Чтение и запись характеристик
