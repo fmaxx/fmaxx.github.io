@@ -112,14 +112,46 @@ The lifecycle is important because certain actions need to take place when the a
 
 **NetworkMonitor** выполняет различные действия, зависящие от состояния жизненного цикла Activity. Другими словами, **NetworkMonitor** должен быть компонентом учитывающим жизненный цикл (**lifecycle-aware компонент**) и реагировать на изменения в жизненном цикле своего родителия – в нашем случае это `MainActivity`.
 
-Jetpack представляет классы и интерфейсы для создания lifecycle-aware компонентов. Мы можем и
+Jetpack предоставляет классы и интерфейсы для создания lifecycle-aware компонентов. Используя их, вы можете улучшить работу `NetworkMonitor`. Он будет работать автоматически с учетом текущего состояния жизненного цикла родительской Activity.
 
+Владелец жизненного цикла (**lifecycle owner**) – это компонент имеющий жизненный цикл, такой как Activity или Fragment. Владелец жизненного цикла должен знать все компоненты, которые будут слушать события жизненного цикла. Паттерн ["Наблюдатель"](https://www.raywenderlich.com/18409174-common-design-patterns-and-app-architectures-for-android#toc-anchor-014){:target="_blank"} считается лучшим подходом для решения такой задачи.
 
+### Создание наблюдателя жизненного цикла (lifecycle observer)
 
+Наблюдатель жизненного цикла компонент, который способен слушать и реагировать на состояния жизненного цикла своего родителя. У Jetpack есть специальный интерфейс для этого – `LifecycleObserver`.
 
+Ну что, настало время улучшить наш `NetworkMonitor`. Откройте **NetworkMonitor.kt** и добавьте к классу поддержку интерфейса `LifecycleObserver`:
 
+{% highlight kotlin %}
+class NetworkMonitor 
+@Inject constructor(private val context: Context) : LifecycleObserver {
+ // Code to observe changes in the network connection.
+}
+{% endhighlight %}
 
+Вот и все, теперь это lifecycle наблюдатель. Вы только что сделали первый шаг по превращению `NetworkMonitor` в lifecycle-aware компонент.
 
+## События и состояния жизненного цикла
+
+Класс `Lifecycle` знает состояние (state) жизненного цикла родителя и передает его любому прослушивающему `LifecycleObserver`.
+
+`Lifecycle` использует два перечисления для обмена данными о жизненном цикле: **Event** и **State**.
+
+### Events
+
+`Event` представляет события жизненного цикла, которые отправляет операционная система:
+
+* ON_CREATE
+* ON_START
+* ON_RESUME
+* ON_PAUSE
+* ON_STOP
+* ON_DESTROY
+* ON_ANY
+
+Каждое значение это эквивалент колбека жизненного цикла. `ON_ANY` отличается тем, что вызывается при любом колбеке.
+
+## Реакция на события жизненного цикла
 
 
 
