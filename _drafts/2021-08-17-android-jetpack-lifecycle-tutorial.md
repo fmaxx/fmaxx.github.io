@@ -153,9 +153,71 @@ class NetworkMonitor
 
 ## Реакция на события жизненного цикла
 
+Сейчас `NetworkMonitor` это **LifecycleObserver**, но он пока не реагирует на жизненный цикл. Нам нужно добавить аннотацию `@OnLifecycleEvent` к методу, чтобы он реагировал на конкретное изменение. Используйте параметр для нужного события.
 
+Добавьте  `@OnLifecycleEvent` к нужным методам, как указано ниже:
+```kotlin
+@OnLifecycleEvent(Lifecycle.Event.ON_CREATE)
+fun init() {
+// ...
+}
 
+@OnLifecycleEvent(Lifecycle.Event.ON_START)
+fun registerNetworkCallback() {
+// ...
+}
 
+@OnLifecycleEvent(Lifecycle.Event.ON_STOP)
+fun unregisterNetworkCallback() {
+// ...
+}
+```
+В этом случае, метод `init()` реагирует на `ON_CREATE` событие, `registerNetworkCallback()` на `ON_START` и на событие `ON_STOP` вызывается `unregisterNetworkCallback()`.
+
+Итак, `NetworkMonitor` теперь может реагировать на изменения жизненного цикла, сейчас вам нужно немного подчистить код. Следующий код больше не нужен в **MainActivity.kt**, потому что эти действия он выполняет сам:
+
+```kotlin
+override fun onCreate(savedInstanceState: Bundle?) {
+  // ...
+  // 1.Network Monitor initialization.
+  networkMonitor.init()
+  // ...
+}
+
+// 2. Register network callback.
+override fun onStart() {
+  super.onStart()
+  networkMonitor.registerNetworkCallback()
+}
+
+// 3. Unregister network callback.
+override fun onStop() {
+  super.onStop()
+  networkMonitor.unregisterNetworkCallback()
+}
+
+```
+
+Полностью удаляйте `onStart()` и `onStop()`. Кроме того надо удалить `networkMonitor.init()` из метода `onCreate()`.
+
+Сделав эти изменения в коде, вы переместили из Activity ответственность за инициализацию, регистрацию и освобождение ресурсов в сам компонент.
+
+## Состояния (States)
+`State` хранит текущее состояние владельца жизненного цикла. Возможные значения:
+- INITIALIZED
+- CREATED
+- STARTED
+- RESUMED
+- DESTROYED
+
+Состояния жизненного цикла сигнализируют, что конкретное событие случилось.
+
+В качестве примера, представим, что мы запускаем длительную инициализацию компонента в событии `ON_START` и Activity (или Fragment) уничтожаются до того, как инициализация  закончится. В этом случае, компонент не должен выполнять никаких действий по событию `ON_STOP`, так как он не был инициализирован.
+
+Существует прямая связь между событиями и состояниями жизненного цикла. На диаграмме ниже, показана это взаимосвязь:
+
+![state events](/images/2021-08-17-android-jetpack-lifecycle-tutorial/state-events.png)
+<br />
 
 
 
