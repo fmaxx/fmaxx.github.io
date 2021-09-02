@@ -342,6 +342,54 @@ viewModel.foodTriviaState.observe(viewLifecycleOwner, Observer {
 
 Как вы помните, любой класс может поддерживать интерфейс `LifecycleOwner`. Это значит, что вы можете создавть кастомного владельца жизненного цикла.
 
+Давайте создадим кастомного владельца, жизненный цикл которого начинается, когда смартфон теряет сетевое соединение и заканчивается при восстановлении соединения.
+
+Откройте **UnavailableConnectionLifecycleOwner.kt** в пакете **monitor** и сделайте изменения, чтобы класс поддерживал интерфейс `LifecycleOwner`:
+
+```kotlin
+@Singleton
+class UnavailableConnectionLifecycleOwner @Inject constructor() : LifecycleOwner {
+// ...
+}
+```
+
+После этого, добавьте `LifecycleRegistry` в **UnavailableConnectionLifecycleOwner**:
+```kotlin
+private val lifecycleRegistry: LifecycleRegistry = LifecycleRegistry(this)
+
+override fun getLifecycle() = lifecycleRegistry
+```
+Класс `LifecycleRegistry` это реализация `Lifecycle`, который может работать с несколькими наблюдателями и уведомлять их о любых изменениях в жизненном цикле.
+
+# Добавляем события
+
+Для уведомления о событиях жизненного цикла можно использовать метод `handleLifecycleEvent()`. Давайте добавим пару методов в наш класс:
+
+```kotlin
+fun onConnectionLost() {
+  lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+}
+
+fun onConnectionAvailable() {
+  lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+}
+```
+
+В случае, когда смартфон потеряет сетевое соединение, `lifecycleRegistry` пошлет событие `ON_START` всем наблюдателям. Когда соединение снова появится, `lifecycleRegistry` отправит `ON_STOP`.
+
+Наконец, добавьте следующий код:
+
+```kotlin
+fun addObserver(lifecycleObserver: LifecycleObserver) {
+  lifecycleRegistry.addObserver(lifecycleObserver)
+}
+```
+
+`addObserver()` регистрирует слушателя жизненного цикла `UnavailableConnectionLifecycleOwner`.
+
+
+# Реакция на события
+
 
 
 
