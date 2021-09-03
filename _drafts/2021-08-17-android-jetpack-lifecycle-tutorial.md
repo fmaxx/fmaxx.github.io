@@ -390,7 +390,38 @@ fun addObserver(lifecycleObserver: LifecycleObserver) {
 
 # Реакция на события
 
+Теперь откройте **MainActivity.kt** и добавьте такую строчку кода:
 
+```kotlin
+unavailableConnectionLifecycleOwner.addObserver(networkObserver)
+```
+
+После этого `networkObserver` будет реагировать на события `unavailableConnectionLifecycleOwner`. `NetworkObserver` покажет SnackBar, когда устройство потеряет сеть и скроет SnackBar при восстановлении сети.
+
+И наконец, замените `handleNetworkState()`:
+
+```kotlin
+private fun handleNetworkState(networkState: NetworkState?) {
+  when (networkState) {
+    NetworkState.Unavailable -> unavailableConnectionLifecycleOwner.onConnectionLost()
+    NetworkState.Available -> unavailableConnectionLifecycleOwner.onConnectionAvailable()
+  }
+}
+```
+
+Этот код запускает события `unavailableConnectionLifecycleOwner`.
+
+Время собрать и запустить ваше приложение. Все работает также как и раньше, кроме мониторинга сети, где мы используем сейчас кастомный `lifecycleOwner` для обработки сетевого состояния.
+
+В следующей секции, вы узнаете как тестировать компоненты жизненного цикла.
+
+## Тестирование компонентов жизненного цикла
+
+Использование компонента жизненного цикла в нашем `NetworkMonitor` дает еще одно преимущество - мы можем тестировать код со всеми связанными событиями жизненного цикла.
+
+Эти тесты будут проверять, что вызывается нужный метод в `NetworkMonitor` в соответствии с состоянием владельца жизненного цикла. Чтобы создать тест, нужно пройти те же шаги, что и при создании кастомного владельца жизненного цикла.
+
+## Настройка тестов
 
 
 
