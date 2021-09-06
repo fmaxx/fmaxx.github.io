@@ -422,6 +422,33 @@ private fun handleNetworkState(networkState: NetworkState?) {
 Эти тесты будут проверять, что вызывается нужный метод в `NetworkMonitor` в соответствии с состоянием владельца жизненного цикла. Чтобы создать тест, нужно пройти те же шаги, что и при создании кастомного владельца жизненного цикла.
 
 ## Настройка тестов
+Откройте **NetworkMonitorTest.kt**. Для запуска теста необходимо сделать заглушки (mock) для владельца жизненного цикла и `NetworkMonitor`. Добавьте две заглушки в тестовый класс:
+
+```kotlin
+private val lifecycleOwner = mockk<LifecycleOwner>(relaxed = true)
+private val networkMonitor = mockk<NetworkMonitor>(relaxed = true)
+```
+
+Здесь используется функционал библиотеки **MockK**, она позволяет имитировать реализацию класса. Аргумент `relaxed` говорит, что заглушки могут работать без указания их поведения.
+
+После этого создайте переменную:
+
+```kotlin
+private lateinit var lifecycle: LifecycleRegistry
+```
+
+Этот код добавляет объект `LifecycleRegistry` в тест, для управления наблюдателями и рассылки им событий жизненного цикла.
+
+И наконец, добавьте следующую строчку кода в метод `setup()`:
+
+```kotlin
+lifecycle = LifecycleRegistry(lifecycleOwner)
+lifecycle.addObserver(networkMonitor)
+```
+
+Здесь инициализируется реестр `LifecycleRegistry`, в него передается заглушка владельца жизненного цикла и добавляется наблюдатель `NetworkMonitor`, чтобы слушать события.
+
+## Добавляем тесты
 
 
 
