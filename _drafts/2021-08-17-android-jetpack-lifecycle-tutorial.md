@@ -421,7 +421,7 @@ private fun handleNetworkState(networkState: NetworkState?) {
 
 Эти тесты будут проверять, что вызывается нужный метод в `NetworkMonitor` в соответствии с состоянием владельца жизненного цикла. Чтобы создать тест, нужно пройти те же шаги, что и при создании кастомного владельца жизненного цикла.
 
-## Настройка тестов
+### Настройка тестов
 Откройте **NetworkMonitorTest.kt**. Для запуска теста необходимо сделать заглушки (mock) для владельца жизненного цикла и `NetworkMonitor`. Добавьте две заглушки в тестовый класс:
 
 ```kotlin
@@ -448,11 +448,83 @@ lifecycle.addObserver(networkMonitor)
 
 Здесь инициализируется реестр `LifecycleRegistry`, в него передается заглушка владельца жизненного цикла и добавляется наблюдатель `NetworkMonitor`, чтобы слушать события.
 
-## Добавляем тесты
+### Добавляем тесты
 
+Чтобы убедиться, что нужный метод вызывается в `NetworkMonitor`, реестр жизненного цикла должен установить правильное состояние и уведомить своих слушателей. Для этого будет использоваться метод `handleLifecycleEvent()`.
 
+Первый тест будет проверять, что при событии `ON_CREATE` вызывается метод `init()`.
 
+Давайте напишем тест:
 
+```kotlin
+@Test
+fun `When dispatching On Create lifecycle event, call init()`() {
+  // 1. Notify observers and set the lifecycle state.
+  lifecycle.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+
+  // 2. Verify the execution of the correct method.
+  verify { networkMonitor.init() }
+}
+``` 
+
+В коде выше вы:
+1. Сначала устанавливаете состояние `ON_CREATE`
+2. После этого, проверяете, что был вызван метод `init()`  в `NetworkMonitor`.
+
+Не забудьте импортировать зависимости:
+```kotlin
+import androidx.lifecycle.Lifecycle
+import io.mockk.verify
+import org.junit.Test
+```
+
+Запускайте тест, он проходит успешно.
+
+Теперь давайте проверим событие `ON_START`, оно должно вызывать метод `registerNetworkCallback()`:
+
+```kotlin
+@Test
+fun `When dispatching On Start lifecycle event, call registerNetworkCallback()`() {
+  lifecycle.handleLifecycleEvent(Lifecycle.Event.ON_START)
+
+  verify { networkMonitor.registerNetworkCallback() }
+}
+```
+
+Этот код проверяет `ON_START` событие.
+
+Тест должен пройти успешно.
+
+В конце концов, создадим тест для проверки события `ON_STOP` и вызова метода `unregisterNetworkCallback()`:
+
+```kotlin
+@Test
+fun `When dispatching On Stop lifecycle event, call unregisterNetworkCallback()`() {
+  // 1. Notify observers and set the lifecycle state.
+  lifecycle.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+
+  // 2. Verify the execution of the correct method.
+  verify { networkMonitor.unregisterNetworkCallback() }
+}
+```
+
+Этот код проверяет `ON_STOP` событие.
+
+Запустите тест и ... он падает с ошибкой **Verification failed: call 1 of 1: NetworkMonitor(#2).unregisterNetworkCallback()) was not called.**
+Это значит, что `unregisterNetworkCallback()` не выполнился при событии `ON_STOP`? Тестовый код посылает событие `ON_STOP`, но перед ним обязательно должно быть событие `ON_START`.
+
+Добавляем событие `ON_START` в тест:
+
+```kotlin
+lifecycle.handleLifecycleEvent(Lifecycle.Event.ON_START)
+lifecycle.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+```  
+
+Теперь тест проходит успешно.
+
+Таким образом, мы проверили все события жизненного цикла и они вызывают нужные методы в `NetworkMonitor`.
+
+## LiveData: компонент жизненного цикла
 
 
 
