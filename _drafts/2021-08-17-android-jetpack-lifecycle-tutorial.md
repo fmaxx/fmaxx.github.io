@@ -526,9 +526,45 @@ lifecycle.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
 
 ## LiveData: компонент жизненного цикла
 
+До этого момента вы узнали как создавать собственный компонент жизненного цикла. Но существуют ли такие же готовые компоненты в Android? Конечно, возможно самый известный из них это **LiveData**.
 
+Принцип `LiveData` достаточно прост. Это хранилище данных за которыми можно наблюдать, то есть оно может содержать данных и уведомлять слушателей об изменениях этих данных. Однако `LiveData` это еще и компонент жизненного цикла, то есть он уведомляет своих наблюдателей только тогда, когда жизненный цикл находится в активном состоянии.
 
+Наблюдатель в **активном состоянии** если его жизненный цикл в состоянии `STARTED` или `RESUMED`. Если жизненный цикл в другом состоянии, `LiveData` не будет уведомлять слушателей об изменениях.
 
+# Создание и присваивание переменных LiveData
+
+Откройте **MainViewModel.kt** из пакета **viewmodels**. Добавьте там следующие переменные:
+
+```kotlin
+private val _loadingState = MutableLiveData<UiLoadingState>()
+val loadingState: LiveData<UiLoadingState>
+  get() {
+    return _loadingState
+  }
+```
+
+`_loadingState` это `LiveData` с двумя возможными значениями: `Loading` и `NotLoading`. Эти значения будут говорить UI показывать или скрывать загрузку (`ProgressBar`).
+
+Каждый раз, когда `LiveData` переменная получает новое значение, она уведомляет своих слушателей об изменении. Для установки нового значения используйте поле **value**.
+
+Давайте изменим метод `getRandomRecipe()`:
+
+```kotlin
+fun getRandomRecipe() {
+  _loadingState.value = UiLoadingState.Loading
+  viewModelScope.launch {
+    recipeRepository.getRandomRecipe().collect { result ->
+      _loadingState.value = UiLoadingState.NotLoading
+      _recipeState.value = result
+    }
+  }
+}
+```
+
+Теперь обновление `value` будет отправлено всем слушателям `_loadingState`.
+
+# Наблюдения за изменениями LiveData
 
 
 
