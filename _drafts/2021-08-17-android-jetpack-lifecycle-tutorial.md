@@ -566,6 +566,24 @@ fun getRandomRecipe() {
 
 # Наблюдения за изменениями LiveData
 
+Откройте **MainActivity.kt** и добавьте код в метод `onCreate()`:
+```kotlin
+viewModel.loadingState.observe(this, Observer { uiLoadingState ->
+  handleLoadingState(uiLoadingState)
+})
+```
+
+Здесь, `MainActivity` начнет наблюдать за обновлениями от `viewModel.loadingState`. Как вы видите, первый аргумент `observe()` это `this`, то есть текущий экземпляр `MainActivity`. Взгляните на сигнатуру метода `observe()`, там видно, что первый аргумент имеет тип `LifecycleOwner`. Это значит, что наблюдатели `LiveData` будут реагировать на изменения в зависимости от состояния жизненного цикла Activity. Для того чтобы открыть сигнатуру метода нажмите **Control**- или **Command**-click.
+
+В методе `observe()` есть такой код:
+```kotlin
+if (owner.getLifecycle().getCurrentState() == DESTROYED) {
+  // ignore
+  return;
+}
+```
+
+Здесь видно, если `LifecycleOwner` в состоянии `DESTROYED` и новое значение было установлено для переменной, то наблюдатель не получит обновление.
 
 
 
