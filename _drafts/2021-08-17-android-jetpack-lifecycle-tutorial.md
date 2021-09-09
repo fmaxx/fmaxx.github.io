@@ -583,7 +583,25 @@ if (owner.getLifecycle().getCurrentState() == DESTROYED) {
 }
 ```
 
-Здесь видно, если `LifecycleOwner` в состоянии `DESTROYED` и новое значение было установлено для переменной, то наблюдатель не получит обновление.
+Здесь видно, если `LifecycleOwner` в состоянии `DESTROYED` и новое значение было установлено для переменной, то наблюдатель не получит обновление. 
+
+Однако, если `LifecycleOwner` становится активным опять, то наблюдатели получат *последнее значение* автоматически.
+
+Соберите и запустите проект. Приложение будет показывать прогресс бар во время загрузки приложения, после окончания прогресс бар скрывается. 
+
+Поздравляю! Вы отрефакторили проект с использованием компонентов жизненного цикла.
+
+## Что посмотреть?
+
+Официальная документация по архитектурным компонентам: [Architecture Components: Official Documentation](https://developer.android.com/topic/libraries/architecture){:target="_blank"}.
+
+Изучаем Jetpack компоненты: [Android Jetpack Architecture Components: Getting Started](https://www.raywenderlich.com/200817/android-jetpack-architecture-components-getting-started){:target="_blank"}.
+
+Дополнительные материалы по тестированию Jetpack компонентов: [Testing Android Architecture Components](https://www.raywenderlich.com/12678525-testing-android-architecture-components){:target="_blank"}.
+
+Глубокое погружение в LiveData: [Testing Android Architecture Components](https://www.raywenderlich.com/10391019-livedata-tutorial-for-android-deep-dive){:target="_blank"}.
+
+
 
 
 
