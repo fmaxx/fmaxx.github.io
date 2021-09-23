@@ -90,11 +90,24 @@ fun <T> Flow<T>.asLiveData(): LiveData<T> = liveData {
 ![Flow is newer and trendy so it must be better, right?](/images/2021-09-13-android-kotlin-flow-viewmodel/kotlin-flow.jpeg)
 
 
+[**Flow**](https://kotlinlang.org/docs/flow.html){:target="_blank"} это класс из библиотеки [Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines){:target="_blank"} представленной в 2019 году, класс является потоком значений, вычисляемый асинхронно. Концептуально похож на RxJava Observable, но основан на корутинах и имеет более простой API.
 
+Изначально были доступны только **холодные потоки** (cold flows): потоки без состояний, которые создаются по требованию каждый раз, когда наблюдатель начинает собирать значения в области видимости (scope) корутины. Каждый наблюдатель получает собственную последовательность значений, они не общие.
 
+Позже были добавлены новые **горячие потоки** подтипы Flow: [**`SharedFlow`**](https://kotlin.github.io/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/-shared-flow/){:target="_blank"} и [**`StateFlow`**](https://kotlin.github.io/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/-state-flow/){:target="_blank"}. Они были выпущены со стабильной реализацией API в версии библиотеки корутин #1.4.0.
 
+**`SharedFlow`** публикует данные, которые распространяются всем слушателям. Класс может управлять дополнительным кешем и/или буфером и фактически заменяет все варианты устаревшего `BroadcastChannel` API.
 
+**`StateFlow`** специально оптимизированный подкласс `SharedFlow`, который хранит и воспроизводит только последнее значение. Что-то знакомое, да? 
 
+# StateFlow и LiveData много общего: 
+
+- Эти классы наблюдаемые (observable)
+- Они хранят и распространяют последнее значение любому количеству наблюдателей
+- Они заставляют перехватывать ошибки на ранней стадии: необработанное исключение (`Exception`) в колбеке LiveData останавливает приложение. Не пойманное исключение в горячем Flow потоке завершает поток без возможности перезапустить его, даже если использовать оператор `.catch()`.
+
+# Но есть и важные отличия:
+- `MutableStateFlow` требует начального значения, в отличие от `MutableLiveData`. Замечание: `MutableSharedFlow(replay = 1)`  может эмулировать `MutableStateFlow` без начального значения, но данная реализация менее эффективна.
 
 
 Android Jetpack - коллекция библиотек для разработчиков, которая улучшает код, уменьшает повторяющийся код и работает единообразно в различных версиях Android. Архитектурные компоненты Android Jetpack дают инструменты 
