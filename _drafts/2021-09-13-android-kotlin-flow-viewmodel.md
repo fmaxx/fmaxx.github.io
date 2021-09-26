@@ -125,9 +125,56 @@ viewModel.results.observe(viewLifecycleOwner) { data ->
 
 Эта операция однократная и дальше LiveData берет на себя синхронизацию потока данных с жизненным циклом наблюдателей.
 
-Аналогичная операция для Flow называется _сбором_ (collecting) и сбор должен выполняться в корутине. Из-за того, что Flow не знает ничего о жизненном цикле, ответственность за жизненный цикл возлагают на корутину работающей с Flow.
+Аналогичная операция для Flow называется _сбором_ (collecting) и сбор должен выполняться в корутине. Из-за того, что Flow не знает ничего о жизненном цикле, ответственность за жизненный цикл возлагают на корутину, работающую с Flow.
 
+Чтобы создать корутину для работы с Flow, учитывающую жизненный цикл Activity/Fragment (запускать работу с данными при состоянии `STARTED` и автоматически отменять эту работу при уничтожении):
 
+```kotlin
+viewLifecycleOwner.lifecycleScope.launchWhenStarted {
+    viewModel.result.collect { data ->
+        displayResult(data)
+    }
+}
+```
+Но здесь есть серьезное ограничение: **код будет работать правильно только с "холодными" потоками, без поддержки каналом или буффером** Такой Flow управляется только собирающей его корутиной: когда Activity/Fragment перейдет в состояние `STOPPPED`, корутина приостановится, производитель Flow также приостановится с ней, и больше ничего не произойдет пока корутина не возобновится.
+
+Однако, есть другие и другие виды Flow:
+- **горячие потоки**, которые всегда активные и посылают результаты всем текущим наблюдателями (включая приостановленные);
+- **холодные потоки с колбэком или поддержкой канала**, которые подписываются на активный источник данных, когда сбор данных запускается и останавливает подписку, когда сбор данных отменяется (не приостанавливается).
+
+В этих случаях, **основной производитель Flow будет оставаться активным** даже когда корутина будет приостановлена, сохраняя (в буфер) новые результаты в фоновом режиме. Ресурсы расходуются впустую, правило #2 нарушается.
+
+![Life is like a box of chocolates](/images/2021-09-13-android-kotlin-flow-viewmodel/forest.jpeg)
+
+Нужно создать более безопасный способ сборка Flow любого типа. Корутина работающая с потоком данных, должна быть отменена когда Activity/Fragment становится невидимой и перезапущена снова, так же, как это делает LiveData-Coroutine-Builder. Для этого был представлен новый API в `lifecycle:lifecycle-runtime-ktx:2.4.0` (остается в статусе alpha на момент написания статьи, на момент перевода - перешел в beta).
+
+```kotlin
+viewLifecycleOwner.lifecycleScope.launch {
+    viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+        viewModel.result.collect { data ->
+            displayResult(data)
+        }
+    }
+}
+```
+
+Или аналогично:
+
+```kotlin
+viewLifecycleOwner.lifecycleScope.launch {
+    viewModel.result
+        .flowWithLifecycle(viewLifecycleOwner.lifecycle, Lifecycle.State.STARTED)
+        .collect { data ->
+            displayResult(data)
+        }
+}
+```
+
+Как видно, эффективно и безопасно работать с данными в Actvivity или Fragment проще с помощью LiveData.
+
+> Можно посмотреть дополнительную информацию о новом API в статье "[**_A safer way to collect flows from Android UIs._**](https://medium.com/androiddevelopers/a-safer-way-to-collect-flows-from-android-uis-23080b1f8bda){:target="_blank"}  from Manuel Vivo.
+
+## Заменяем LiveData на StateFlow в ViewModel
 
 
 
