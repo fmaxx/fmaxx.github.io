@@ -174,11 +174,31 @@ viewLifecycleOwner.lifecycleScope.launch {
 
 > Можно посмотреть дополнительную информацию о новом API в статье "[**_A safer way to collect flows from Android UIs._**](https://medium.com/androiddevelopers/a-safer-way-to-collect-flows-from-android-uis-23080b1f8bda){:target="_blank"}  from Manuel Vivo.
 
-## Заменяем LiveData на StateFlow в ViewModel
+## Заменяем LiveData на StateFlow во ViewModel
 
+Давайте-ка вернемся обратно к ViewModel. Мы убедились, что это простой и эффективный способ работы с данными в асинхронном режиме:
 
+```kotlin
+val result: LiveData<Result> = liveData {
+    val data = someSuspendingFunction()
+    emit(data)
+}
+```
 
+Как мы можем добиться того же самого, используя `StateFlow` вместо `LiveData`? _Jose Alcérreca_ написал [внушительное руководство](https://medium.com/androiddevelopers/migrating-from-livedata-to-kotlins-flow-379292f419fb){:target="_blank"} для ответа на этот вопрос. Вкратце, для случая выше, код будет выглядеть так:
 
+```kotlin
+val result: Flow<Result> = flow {
+    val data = someSuspendingFunction()
+    emit(data)
+}.stateIn(
+    scope = viewModelScope,
+    started = SharingStarted.WhileSubscribed(5000L),
+    initialValue = Result.Loading
+)
+```
+
+Оператор `stateIn()` трансформирует наш холодный Flow в горячий, способный делиться одним и тем же результатом между разными наблюдателями.
 
 
 
