@@ -242,14 +242,44 @@ class MyViewModel(repository: MyRepository) : ViewModel() {
 }
 ```
 
+- При обновлении, оператор `switchMap()` подключает наблюдателей к новому источнику LiveData, заменяя старый. И так как в примере выше, используется LiveData coroutine builder, старая LiveData автоматически отменит связанную с ним корутину через 5 секунд после отключения от своих наблюдателей. Работа с устаревшими данными прекращается с небольшой задержкой.
 
+- Так как в LiveData есть версионность, `MutableLiveData` триггер отправит новое значение **только один раз** оператору `switchMap()`, как только появится хотя бы один активный наблюдатель. Позже, если наблюдатели становятся неактивными и активными снова, работа источника данных LiveData просто возобновится с последними данными, где она остановилась.
 
+Этот код достаточно прост и соблюдает все правила по эффективности выше.
 
+Давайте посмотрим, можно ли реализовать ту же самую логику с классом **`MutableStateFlow`** вместо `MutableLiveData`.
 
+## Наивный подход
 
+```kotlin
+class MyViewModel(repository: MyRepository) : ViewModel() {
+    private val trigger = MutableStateFlow("")
 
+    fun setQuery(query: String) {
+        trigger.value = query
+    }
 
+    val results: Flow<SearchResult> = trigger.mapLatest { query ->
+        repository.search(query)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000L),
+        initialValue = SearchResult.EMPTY
+    )
+}
+```
 
+API `MutableLiveData` и `MutableLiveData` выглядят очень похоже, код триггера выглядит почти одинаково. Самое большое различие это использование [**mapLatest**](https://kotlin.github.io/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/map-latest.html){:target="_blank"}, это эквивалент функции `switchMap()` в LiveData для возвращения единственного значения (для возвращения нескольких значений, надо использовать [**flatMapLatest**](https://kotlin.github.io/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.flow/flat-map-latest.html){:target="_blank"}).
+
+`mapLatest()` работает как `map()`, но вместо полного преобразования по порядку всех входных значений, входные значения используются немедленно, а преобразование происходит в **отдельной корутине** асинхронно. При появлении нового значения во входящем потоке данных, трансформация предыдущего значения будет **немедленно отменена**, если она все еще работала и вместо нее будет запущена новая трансформация. Таким образом можно избежать работы с устаревшими данными.
+
+Вроде выглядит неплохо. Однако здесь всплывает основная проблема: так как `StateFlow` не поддерживает версионность, триггер отправит **повторно последнее значение**, когда Flow перезапустится. Это случается **каждый раз, когда Activity/Frgament становится видимым опять**, после того, как был невидимым более 5 секунд.
+
+![Oops! I emit again!](/images/2021-09-13-android-kotlin-flow-viewmodel/oops.jpeg)
+
+Триггер выдает значение повторно, `mapLatest()` снова запускается, еще раз дергается метод в репозитории с теми же аргументами, хотя результат уже был получен и обработан.
+Правило #1 не работает: актуальные данные не должны загружаться повторно.
 
 
 
