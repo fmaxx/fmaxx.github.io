@@ -44,7 +44,7 @@ fun loginUser(userId: String, password: String, userResult: Callback<User>) {
 }
 ```
 
-Заменяем эти колбекина последовательные вызовы функций с использованием корутин:
+Заменяем эти колбеки на последовательные вызовы функций с использованием корутин:
 ```kotlin
 suspend fun loginUser(userId: String, password: String): UserDb {
   val user = userRemoteDataSource.logUserIn(userId, password)
@@ -59,7 +59,7 @@ suspend fun loginUser(userId: String, password: String): UserDb {
 Но что в действительности делает компилятор внутри, когда мы отмечаем функцию как _suspend_?
 
 ## Suspend под капотом
-Давайте вернемся к suspend функции `loginUser`, посмотрите, другие функции которые она вызывает являются также suspend функциями:
+Давайте вернемся к suspend функции `loginUser`, посмотрите, другие функции которые она вызывает это тоже suspend функции:
 
 ```kotlin
 suspend fun loginUser(userId: String, password: String): UserDb {
@@ -92,7 +92,7 @@ interface Continuation<in T> {
 
 > С Kotlin 1.3 и далее, вы можете использовать extensions функции [resume(value: T)](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/resume.html){:target="_blank"} и [resumeWithException(exception: Throwable)](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/resume-with-exception.html){:target="_blank"}, это специализированные версии метода `resumeWith`.
 
-Компилятор заменяет ключевое слово suspend на дополнительный аргумент `completion` (тип `Continuation`) в функции, аргуемнт используется для передачи результата suspend функции в вызывающую корутину:
+Компилятор заменяет ключевое слово suspend на дополнительный аргумент `completion` (тип `Continuation`) в функции, аргумент используется для передачи результата suspend функции в вызывающую корутину:
 
 
 ```kotlin
@@ -120,7 +120,7 @@ fun loginUser(userId: String, password: String, completion: Continuation<Any?>) 
 
 Есть подтип `Continuation`, он называется [DispatchedContinuation](https://github.com/Kotlin/kotlinx.coroutines/blob/master/kotlinx-coroutines-core/common/src/internal/DispatchedContinuation.kt){:target="_blank"}, где его метод `resume` делает вызов `Dispatcher` доступного в контексте корутины `CoroutineContext`. Все диспетчеры (`Dispatchers`) будут вызывать метод `dispatch`, кроме типа `Dispatchers.Unconfined`, он переопределяет метод `isDispatchNeeded` (он вызывается перед вызовом `dispatch`), который возвращает _false_ в этом случае.
 
-## Сгенрированная машина состояний
+## Сгенерированная машина состояний
 
 > Уточнение: Приведенный код не полностью соответствует байткоду сгенерированному компилятором. Это будет код на Kotlin, достаточно точный, для понимания того, что в действительности происходит внутри. Это представление сгенерировано корутинами версии 1.3.3 и может поменяться в следующих версиях библиотеки.
 
@@ -357,7 +357,7 @@ fun loginUser(userId: String?, password: String?, completion: Continuation<Any?>
 Компилятор Kotlin преобразовывает каждую _suspend_ функцию в машину состояний, с использованием обратных вызовов.
 
 Зная как компилятор работает "под капотом", вы лучше понимаете:
-- почему _suspend_ функция не вернет результат пока не завершится вся работа, которая она начала;
+- почему _suspend_ функция возвращает результат только, когда завершится вся работа, которую она начала;
 - каким образом код приостанавливается не блокируя потоки (вся информация, о том что нужно выполнить при возобновлении работы, хранится в объекте `Continuation`).
 
 
