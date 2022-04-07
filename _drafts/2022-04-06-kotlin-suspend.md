@@ -1,7 +1,7 @@
 ---
 layout:     post
 title:      Kotlin, как работает SUSPEND под капотом.
-date:       2021-10-10 12:02:00
+date:       2022-04-06 12:02:00
 summary:    Разбираемся, что происходит при использовании ключевого слова SUSPEND в Kotlin.
 categories: Android Kotlin Coroutines Suspend
 ---
@@ -78,7 +78,7 @@ suspend fun logUserIn(userId: String): UserDb
 Кратко говоря, компилятор Kotlin берет suspend функции и преобразовывает их в оптимизированную версию колбеков с использованием [конечной машины состояний](https://en.wikipedia.org/wiki/Finite-state_machine){:target="_blank"} (о которой мы поговорим позже).
 
 # Интерфейс Continuation
-Suspend функции взаимодействуют друг с другом с помощью `Continuation` объектов. `Continuation` объект - это просто generic интерфейс-колбек с дополнительными данными. Позже мы увидим, реализация интерфейса будет представлять собой сгенерированную машину состояний для suspend функции.
+Suspend функции взаимодействуют друг с другом с помощью `Continuation` объектов. `Continuation` объект - это простой generic интерфейс с дополнительными данными. Позже мы увидим, что сгенерированная машина состояний для suspend функции будет реализовать этот интерфейс.
 
 Сам интерфейс выглядит так:
 ```kotlin
@@ -92,7 +92,7 @@ interface Continuation<in T> {
 
 > С Kotlin 1.3 и далее, вы можете использовать extensions функции [resume(value: T)](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/resume.html){:target="_blank"} и [resumeWithException(exception: Throwable)](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/resume-with-exception.html){:target="_blank"}, это специализированные версии метода `resumeWith`.
 
-Компилятор заменяет ключевое слово suspend на дополнительный аргумент `completion` (тип `Continuation`) в функции, он используется для передачи результата suspend функции в вызывающую корутину:
+Компилятор заменяет ключевое слово suspend на дополнительный аргумент `completion` (тип `Continuation`) в функции, аргуемнт используется для передачи результата suspend функции в вызывающую корутину:
 
 
 ```kotlin
@@ -106,11 +106,11 @@ fun loginUser(userId: String, password: String, completion: Continuation<Any?>) 
 
 Байткод suspend функций фактически возвращает `Any?` так как это объединение (union) типов `T | COROUTINE_SUSPENDED`. Что позволяет функции возвращать результат синхронно, когда это возможно.
 
-> Если suspend функция не вызывает другие suspend функции, компилятор добавляет добавляет аргумент Continuation, но не будет с ним ничего делать, байткод функции будет выглядеть как обычная функция.
+> Если suspend функция не вызывает другие suspend функции, компилятор добавляет аргумент Continuation, но не будет с ним ничего делать, байткод функции будет выглядеть как обычная функция.
 
 Кроме того, интерфейс `Continuation` можно увидеть в:
 
-- При конвертации колбек-API в коротины с использованием [suspendCoroutine](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/suspend-coroutine.html){:target="_blank"} или [suspendCancellableCoroutine](https://kotlin.github.io/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/suspend-cancellable-coroutine.html){:target="_blank"} (предпочтительнее использовать в большинстве случаев). Вы напрямую взаимодействуете с 
+- При конвертации колбек-API в корутины с использованием [suspendCoroutine](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/suspend-coroutine.html){:target="_blank"} или [suspendCancellableCoroutine](https://kotlin.github.io/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/suspend-cancellable-coroutine.html){:target="_blank"} (предпочтительнее использовать в большинстве случаев). Вы напрямую взаимодействуете с 
 экземпляром `Continuation`, чтобы возобновить корутину, приостановленную после выполнения блока кода из аргументов suspend функции.
 
 - Вы можете запустить корутину при помощи [startCoroutine](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/start-coroutine.html){:target="_blank"} extension функции в suspend методе. Она принимает `Continuation` как аргумент, который будет вызван, когда новая корутина завершится либо с результатом, либо с исключением.
@@ -197,7 +197,7 @@ fun loginUser(userId: String?, password: String?, completion: Continuation<Any?>
 }
 ```
 
-Поскольку `invokeSuspend` вызывает `loginUser` снова только с аргументом `Continuation`, остальные аргументы в функции `loginUser` будут нулевыми. На этом этапе компилятору нужно только добавить информацию как переходить из одного состояния в другое.
+Поскольку `invokeSuspend` вызывает `loginUser` только с аргументом `Continuation`, остальные аргументы в функции `loginUser` будут нулевыми. На этом этапе компилятору нужно только добавить информацию как переходить из одного состояния в другое.
 
 Компилятору нужно знать:
 1. Функция вызывается первый раз или
@@ -277,8 +277,9 @@ fun loginUser(userId: String?, password: String?, completion: Continuation<Any?>
     }
 }
 ```
-
-Как видно, компилятор Kotlin делает много работы "под капотом". Из _suspend_ функции:
+<br/>
+Компилятор Kotlin делает много работы "под капотом". 
+Из _suspend_ функции:
 ```kotlin
 suspend fun loginUser(userId: String, password: String): User {
   val user = userRemoteDataSource.logUserIn(userId, password)
@@ -287,6 +288,7 @@ suspend fun loginUser(userId: String, password: String): User {
 }
 ```
 
+<br/>
 Генерируется большой кусок кода:
 ```kotlin
 fun loginUser(userId: String?, password: String?, completion: Continuation<Any?>) {
@@ -347,6 +349,8 @@ fun loginUser(userId: String?, password: String?, completion: Continuation<Any?>
     }
 }
 ```
+
+<br/>
 
 ---
 
