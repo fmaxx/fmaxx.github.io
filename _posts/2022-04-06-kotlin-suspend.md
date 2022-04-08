@@ -1,7 +1,7 @@
 ---
 layout:     post
 title:      Kotlin, как работает SUSPEND под капотом.
-date:       2021-10-10 12:02:00
+date:       2022-04-06 12:02:00
 summary:    Разбираемся, что происходит при использовании ключевого слова SUSPEND в Kotlin.
 categories: Android Kotlin Coroutines Suspend
 ---
@@ -11,9 +11,9 @@ categories: Android Kotlin Coroutines Suspend
 
 Как компилятор преобразует _suspend_ код, чтобы корутины можно было приостанавливать и возобновлять?
 
-Корутины в Kotlin представлены ключевым словом **_suspend_**. Интересно что там происходит внутри? Как компилятор трансформирует _suspend_ блоки в код, который поддерживающий приостановку и возобновление работы корутины?
+Корутины в Kotlin представлены ключевым словом **_suspend_**. Интересно, что там происходит внутри? Как компилятор преобразует _suspend_ блоки в код, поддерживающий приостановку и возобновление работы корутины?
 
-Знание этого поможет понимать почему suspend функция не возвращает управление, пока не завершится вся запущенная работа и как код может приостановить выполнение без блокировки потоков. 
+Знание этого поможет понимать, почему suspend функция не возвращает управление, пока не завершится вся запущенная работа и как код может приостановить выполнение без блокировки потоков. 
 
 > TL;DR; Компилятор Kotlin создает специальную машину состояний для каждой suspend функции, эта машина берет управление корутиной на себя!
 
@@ -25,8 +25,9 @@ categories: Android Kotlin Coroutines Suspend
 
 <iframe width="840" height="473" src="https://www.youtube.com/embed/IQf-vtIC-Uc" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
 
+<br/>
 # Корутины, краткое введение
-Говоря по-простому, корутины это асинхронные операции в Android. Как описано в [документации](https://developer.android.com/kotlin/coroutines){:target="_blank"}, мы можем использовать корутины для управления асинхронными задачами, которые иначе блокируют основной поток и приводят к зависанию UI приложения.
+Говоря по-простому, корутины это асинхронные операции в Android. Как описано в [документации](https://developer.android.com/kotlin/coroutines){:target="_blank"}, мы можем использовать корутины для управления асинхронными задачами, которые иначе могут блокировать основной поток и приводить к зависанию UI приложения.
 
 Также корутины удобно использовать для замены callback-кода на императивный код. Например, посмотрите на этот код с использованием колбеков:
 ```kotlin
@@ -43,7 +44,7 @@ fun loginUser(userId: String, password: String, userResult: Callback<User>) {
 }
 ```
 
-Заменяем эти колбекина последовательные вызовы функций с использованием корутин:
+Заменяем эти колбеки на последовательные вызовы функций с использованием корутин:
 ```kotlin
 suspend fun loginUser(userId: String, password: String): UserDb {
   val user = userRemoteDataSource.logUserIn(userId, password)
@@ -58,7 +59,7 @@ suspend fun loginUser(userId: String, password: String): UserDb {
 Но что в действительности делает компилятор внутри, когда мы отмечаем функцию как _suspend_?
 
 ## Suspend под капотом
-Давайте вернемся к suspend функции `loginUser`, посмотрите, другие функции которые она вызывает являются также suspend функциями:
+Давайте вернемся к suspend функции `loginUser`, посмотрите, другие функции которые она вызывает это тоже suspend функции:
 
 ```kotlin
 suspend fun loginUser(userId: String, password: String): UserDb {
@@ -77,7 +78,7 @@ suspend fun logUserIn(userId: String): UserDb
 Кратко говоря, компилятор Kotlin берет suspend функции и преобразовывает их в оптимизированную версию колбеков с использованием [конечной машины состояний](https://en.wikipedia.org/wiki/Finite-state_machine){:target="_blank"} (о которой мы поговорим позже).
 
 # Интерфейс Continuation
-Suspend функции взаимодействуют друг с другом с помощью `Continuation` объектов. `Continuation` объект - это просто generic интерфейс-колбек с дополнительными данными. Позже мы увидим, реализация интерфейса будет представлять собой сгенерированную машину состояний для suspend функции.
+Suspend функции взаимодействуют друг с другом с помощью `Continuation` объектов. `Continuation` объект - это простой generic интерфейс с дополнительными данными. Позже мы увидим, что сгенерированная машина состояний для suspend функции будет реализовать этот интерфейс.
 
 Сам интерфейс выглядит так:
 ```kotlin
@@ -86,12 +87,13 @@ interface Continuation<in T> {
   public fun resumeWith(value: Result<T>)
 }
 ```
-- `context` это экземпляр `CoroutineContext`, который будет использоваться в этом продолжении.
+- `context` это экземпляр `CoroutineContext`, который будет использоваться при возобновлении.
 - `resumeWith` возобновляет выполнение корутины с [Result](https://github.com/Kotlin/kotlinx.coroutines/blob/master/stdlib-stubs/src/Result.kt){:target="_blank"}, он может либо содержать результат вычисления, либо исключение.
 
 > С Kotlin 1.3 и далее, вы можете использовать extensions функции [resume(value: T)](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/resume.html){:target="_blank"} и [resumeWithException(exception: Throwable)](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/resume-with-exception.html){:target="_blank"}, это специализированные версии метода `resumeWith`.
 
-Компилятор заменяет ключевое слово suspend на дополнительный аргумент `completion` (тип `Continuation`) в сигнатуре функции, который будет использоваться для передачи результата работы suspend функции в вызывающую корутину:
+Компилятор заменяет ключевое слово suspend на дополнительный аргумент `completion` (тип `Continuation`) в функции, аргумент используется для передачи результата suspend функции в вызывающую корутину:
+
 
 ```kotlin
 fun loginUser(userId: String, password: String, completion: Continuation<Any?>) {
@@ -104,11 +106,11 @@ fun loginUser(userId: String, password: String, completion: Continuation<Any?>) 
 
 Байткод suspend функций фактически возвращает `Any?` так как это объединение (union) типов `T | COROUTINE_SUSPENDED`. Что позволяет функции возвращать результат синхронно, когда это возможно.
 
-> Если suspend функция не вызывает другие suspend функции, компилятор добавляет добавляет аргумент Continuation, но не будет с ним ничего делать, байткод функции будет выглядеть как обычная функция.
+> Если suspend функция не вызывает другие suspend функции, компилятор добавляет аргумент Continuation, но не будет с ним ничего делать, байткод функции будет выглядеть как обычная функция.
 
 Кроме того, интерфейс `Continuation` можно увидеть в:
 
-- При конвертации колбек-API в коротины с использованием [suspendCoroutine](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/suspend-coroutine.html){:target="_blank"} или [suspendCancellableCoroutine](https://kotlin.github.io/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/suspend-cancellable-coroutine.html){:target="_blank"} (предпочтительнее использовать в большинстве случаев). Вы напрямую взаимодействуете с 
+- При конвертации колбек-API в корутины с использованием [suspendCoroutine](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/suspend-coroutine.html){:target="_blank"} или [suspendCancellableCoroutine](https://kotlin.github.io/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/suspend-cancellable-coroutine.html){:target="_blank"} (предпочтительнее использовать в большинстве случаев). Вы напрямую взаимодействуете с 
 экземпляром `Continuation`, чтобы возобновить корутину, приостановленную после выполнения блока кода из аргументов suspend функции.
 
 - Вы можете запустить корутину при помощи [startCoroutine](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/start-coroutine.html){:target="_blank"} extension функции в suspend методе. Она принимает `Continuation` как аргумент, который будет вызван, когда новая корутина завершится либо с результатом, либо с исключением.
@@ -118,7 +120,7 @@ fun loginUser(userId: String, password: String, completion: Continuation<Any?>) 
 
 Есть подтип `Continuation`, он называется [DispatchedContinuation](https://github.com/Kotlin/kotlinx.coroutines/blob/master/kotlinx-coroutines-core/common/src/internal/DispatchedContinuation.kt){:target="_blank"}, где его метод `resume` делает вызов `Dispatcher` доступного в контексте корутины `CoroutineContext`. Все диспетчеры (`Dispatchers`) будут вызывать метод `dispatch`, кроме типа `Dispatchers.Unconfined`, он переопределяет метод `isDispatchNeeded` (он вызывается перед вызовом `dispatch`), который возвращает _false_ в этом случае.
 
-## Сгенрированная машина состояний
+## Сгенерированная машина состояний
 
 > Уточнение: Приведенный код не полностью соответствует байткоду сгенерированному компилятором. Это будет код на Kotlin, достаточно точный, для понимания того, что в действительности происходит внутри. Это представление сгенерировано корутинами версии 1.3.3 и может поменяться в следующих версиях библиотеки.
 
@@ -195,7 +197,7 @@ fun loginUser(userId: String?, password: String?, completion: Continuation<Any?>
 }
 ```
 
-Поскольку `invokeSuspend` вызывает `loginUser` снова только с аргументом `Continuation`, остальные аргументы в функции `loginUser` будут нулевыми. На этом этапе компилятору нужно только добавить информацию как переходить из одного состояния в другое.
+Поскольку `invokeSuspend` вызывает `loginUser` только с аргументом `Continuation`, остальные аргументы в функции `loginUser` будут нулевыми. На этом этапе компилятору нужно только добавить информацию как переходить из одного состояния в другое.
 
 Компилятору нужно знать:
 1. Функция вызывается первый раз или
@@ -246,8 +248,7 @@ fun loginUser(userId: String?, password: String?, completion: Continuation<Any?>
 }
 ```
 
-
-Приглядитесь к коду выше, видите различия между ним и предыдущим примером кода?
+Обратите внимание на различия между этим и предыдущим примером кода:
 
 - Появилась переменная `label` из `LoginUserStateMachine`, которая передается в `when`.
 - Каждый раз при обработке нового состояния проверяется есть ли ошибка.
@@ -276,6 +277,88 @@ fun loginUser(userId: String?, password: String?, completion: Continuation<Any?>
     }
 }
 ```
+<br/>
+Компилятор Kotlin делает много работы "под капотом". 
+Из _suspend_ функции:
+```kotlin
+suspend fun loginUser(userId: String, password: String): User {
+  val user = userRemoteDataSource.logUserIn(userId, password)
+  val userDb = userLocalDataSource.logUserIn(user)
+  return userDb
+}
+```
+
+<br/>
+Генерируется большой кусок кода:
+```kotlin
+fun loginUser(userId: String?, password: String?, completion: Continuation<Any?>) {
+
+    class LoginUserStateMachine(
+        // completion parameter is the callback to the function that called loginUser
+        completion: Continuation<Any?>
+    ): CoroutineImpl(completion) {
+        // objects to store across the suspend function
+        var user: User? = null
+        var userDb: UserDb? = null
+
+        // Common objects for all CoroutineImpl
+        var result: Any? = null
+        var label: Int = 0
+
+        // this function calls the loginUser again to trigger the 
+        // state machine (label will be already in the next state) and 
+        // result will be the result of the previous state's computation
+        override fun invokeSuspend(result: Any?) {
+            this.result = result
+            loginUser(null, null, this)
+        }
+    }
+
+    val continuation = completion as? LoginUserStateMachine ?: LoginUserStateMachine(completion)
+
+    when(continuation.label) {
+        0 -> {
+            // Checks for failures
+            throwOnFailure(continuation.result)
+            // Next time this continuation is called, it should go to state 1
+            continuation.label = 1
+            // The continuation object is passed to logUserIn to resume 
+            // this state machine's execution when it finishes
+            userRemoteDataSource.logUserIn(userId!!, password!!, continuation)
+        }
+        1 -> {
+            // Checks for failures
+            throwOnFailure(continuation.result)
+            // Gets the result of the previous state
+            continuation.user = continuation.result as User
+            // Next time this continuation is called, it should go to state 2
+            continuation.label = 2
+            // The continuation object is passed to logUserIn to resume 
+            // this state machine's execution when it finishes
+            userLocalDataSource.logUserIn(continuation.user, continuation)
+        }
+        2 -> {
+            // Checks for failures
+            throwOnFailure(continuation.result)
+            // Gets the result of the previous state
+            continuation.userDb = continuation.result as UserDb
+            // Resumes the execution of the function that called this one
+            continuation.cont.resume(continuation.userDb)
+        }
+        else -> throw IllegalStateException(/* ... */)
+    }
+}
+```
+
+<br/>
+
+---
+
+Компилятор Kotlin преобразовывает каждую _suspend_ функцию в машину состояний, с использованием обратных вызовов.
+
+Зная как компилятор работает "под капотом", вы лучше понимаете:
+- почему _suspend_ функция возвращает результат только, когда завершится вся работа, которую она начала;
+- каким образом код приостанавливается не блокируя потоки (вся информация, о том что нужно выполнить при возобновлении работы, хранится в объекте `Continuation`).
 
 
 
