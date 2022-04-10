@@ -15,8 +15,8 @@ My professional areas are:
 
 I'm in the web:
 
-* [linkedin] (https://www.linkedin.com/in/fmaxx)
-* [facebook] (https://www.facebook.com/firmaxim)
+* [linkedin](https://www.linkedin.com/in/fmaxx)
+* [facebook](https://www.facebook.com/firmaxim)
 * [github](https://github.com/fmaxx)
-* [stackoverflow] (https://stackoverflow.com/users/2154011/maxim-firsoff)
-* [habr] (https://habr.com/ru/users/FirsofMaxim)
+* [stackoverflow](https://stackoverflow.com/users/2154011/maxim-firsoff)
+* [habr](https://habr.com/ru/users/FirsofMaxim)
