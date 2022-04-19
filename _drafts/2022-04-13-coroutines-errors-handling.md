@@ -10,12 +10,43 @@ categories: Android Kotlin Coroutines Suspend Error
 
 ![coding image](/images/2022-04-13-coroutines-errors-handling/1.webp)
 
-Как Kotlin разработчик, вы скорее всего знаете, что корутины в случае ошибки выкидывают исключения.
+## Как Kotlin разработчик, вы скорее всего знаете, что корутины в случае ошибки выкидывают исключения.
 
 Возможно вы думаете, что обработка таких исключений, происходит как обычно в Kotlin/Java код. К сожалению, при использовании вложенных корутин, все может работать не так как ожидается.
 
+В этой статье я попробую показать ситуации, в которых требуется осторожность и расскажу про лучшие практики в обработке ошибок.
 
+## Работа вложенных корутин
 
+Давайте начнем с примера, где вроде бы все выглядит нормально.
+Пример показывает сценарий, когда нужно обновить View, данные для которого комбинируются из двух разных источников и один из источников падает с ошибкой. Функция-билдер для корутин `async` будет использоваться в слое _Repository_ для выполнения двух запросов паралелльно. Билдер требует `CoroutineScope` обычно он берется из _ViewModel_ в которой запускается выполнение корутины. Метод _Repository_ будет выглядеть так:
+
+```kotlin
+suspend fun getNecessaryData(scope: CoroutineScope): List<DisplayModel> {
+    val failingDataDeferred = scope.async { apiService.getFailingData() }
+    val successDataDeferred = scope.async { apiService.getData() }
+    return failingDataDeferred.await().plus(successDataDeferred.await())
+        .map(DisplayModel::fromResponse)
+}
+```
+
+Запрос с ошибкой просто пробрасывает исключение в своем теле через небольшое время:
+
+```kotlin
+suspend fun getFailingData(): List<ResponseModel> {
+    delay(100)
+    throw RuntimeException("Request Failed")
+}
+```
+
+Во _ViewModel_ данные запрашиваются так:
+```kotlin
+viewModelScope.launch {
+    kotlin.runCatching { repository.getNecessaryData(this) }
+        .onSuccess { liveData.postValue(ViewState.Success(it)) }
+        .onFailure { liveData.postValue(ViewState.Error(it)) }
+}
+```
 
 
 
