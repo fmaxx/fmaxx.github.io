@@ -72,6 +72,42 @@ fun failingMethod() {
 
 ## Распространение исключений
 
+Давайте перенесем логику предыдущего примера во _ViewModel_:
+
+```kotlin
+viewModelScope.launch {
+     try {
+        val failingData = async { throw RuntimeException("Request Failed") }
+        val data = async { apiService.getData() }
+        val result = failingData.await().plus(data.await()).map(DisplayModel::fromResponse)
+        liveData.postValue(ViewState.Success(result))
+     } catch (e: Exception) {
+        liveData.postValue(ViewState.Error(e))
+     }
+}
+```
+
+Можно заметить некоторое сходство. Первая функция `async` выглядит как `failingMethod` выше, но так как исключение не перехватывается, похоже что этот блок не пробрасывает исключение дальше!
+
+Это первый ключевой момент в этой истории:
+
+И `launch` и `async` функции не пробрасывают исключения, которые возникают внутри. Вместо этого, они РАСПРОСТРАНЯЮТ их вверх по иерархии корутины.
+Поведение верхнего уровня `async` объясняется ниже.
+
+## Иерархия корутины и CoroutineExceptionHandler
+
+Наша иерархия корутин выглядит таким образом: 
+
+![Coroutine image](/images/2022-04-13-coroutines-errors-handling/2.png)
+
+На самом верху у нас находится область видимости (scope) от _ViewModel_, где мы создаем корутину **верхнего уровня** при помощи функции `launch`. Внутри этой корутины мы добавляем 2 **дочерние** корутины через `async`.
+Когда исключение возникает в любой дочерней корутине, исключение не пробрасывается, а немедленно передается вверх по иерархии пока не достигнет объекта области видимости (scope).
+
+Далее _scope_ передает исключение в обработчик `CoroutineExceptionHandler`. Он может быть установлен или в самом _scope_ через конструктор или в корутине верхнего уровня, как параметр в функциях `async` и `launch`.
+
+The scope then passes the exception to the CoroutineExceptionHandler. 
+This object can be installed either in the scope itself by passing it in its constructor or in the top-level coroutine by passing it as a parameter to the launch or async methods.
+
 
 
 
