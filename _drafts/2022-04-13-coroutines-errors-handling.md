@@ -105,9 +105,61 @@ viewModelScope.launch {
 
 Далее _scope_ передает исключение в обработчик `CoroutineExceptionHandler`. Он может быть установлен или в самом _scope_ через конструктор или в корутине верхнего уровня, как параметр в функциях `async` и `launch`.
 
-The scope then passes the exception to the CoroutineExceptionHandler. 
-This object can be installed either in the scope itself by passing it in its constructor or in the top-level coroutine by passing it as a parameter to the launch or async methods.
+Имейте ввиду, установка обработчика в любой **дочерней** корутине не будет работать.
 
+Такой механизм распространиения исключений это часть **Структурной Конкурентности (Structured Concurrency)**, принцип проектирования корутин, введеный авторами для правильного выполнения и отмены иерархии корутин без утечек памяти.
+
+[Больше деталей здесь.](https://elizarov.medium.com/structured-concurrency-722d765aa952){:target="_blank"}
+
+Ок, но почему наше приложение падает, когда есть такой механизм? Потому что мы не установили никакого обработчика `CoroutineExceptionHandler`!
+
+Давайте передадим обработчик в функцию `launch` (сделать это через scope здесь невозможно, так как `viewModelScope` создается не нами):
+
+```kotlin
+private val exceptionHandler = CoroutineExceptionHandler { coroutineContext, throwable ->
+    liveData.postValue(ViewState.Error(throwable))
+}
+
+viewModelScope.launch(exceptionHandler) {
+    // content unchanged
+}
+```
+Теперь мы будем правильно получать ошибку в наше _view_.
+
+## Дополнительные возможности
+
+После наших правок, блок `try-catch` больше не нужен, исключения больше не будут перехватываться там.
+Мы можем удалить его и полностью полагаться на установленный обработчик ошибок. Однако, это может быть не самым лучшим решением, если нам нужен больший контоль над выполнением корутин, так как этот обработчик собирает все исключения и дает механизмов повтора или альтернативного исполнения.
+
+Вторая возможность – удалить обработчик исключений, оставить логику блока `try-catch`, но изменить слой репозитория данных (_Repository_) с использованием специальных билдеров корутин для вложенного исполнения: `coroutineScope` и `supervisorScope`. Таким образом у нас будет больше контроля над потоком исполнения и, к примеру, можно использовать метод `recoverCatching` из `kotlin.Result` если требуется операция восстановления после ошибки.
+
+Давайте взглянем, что эти билдеры предлагают.
+
+## coroutineScope билдер
+
+Этот билдер создает дочерний _scope_ в иерархии корутины. Ключевые особенности:
+
+- наследует контекст из вызывающей корутины и поддерживает структурную конкурентность
+- не распространяет исключения из дочерних корутин, вместо этого пробрасывает (re-throw) исключения
+- отменяет все дочерние корутины, если хотя бы одна из них падает с ошибкой
+
+Теперь больше не надо передавать `viewModelScope` в метод:
+
+```kotlin
+suspend fun getNecessaryData(): List<DisplayModel> = coroutineScope {
+     val failingDataDeferred = async { apiService.getFailingData() }
+     val successDataDeferred = async { apiService.getData() }
+     
+     failingDataDeferred.await().plus(successDataDeferred.await())
+        .map(DisplayModel::fromResponse)
+}
+```
+
+После этих правок, исключение из первой функции `async` попадет в `try-catch` блок во `ViewModel`, потому что исключение повторно пробрасывается из функции билдера.
+
+
+
+## supervisorScope билдер
 
 
 
