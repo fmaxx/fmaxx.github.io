@@ -158,8 +158,51 @@ suspend fun getNecessaryData(): List<DisplayModel> = coroutineScope {
 После этих правок, исключение из первой функции `async` попадет в `try-catch` блок во `ViewModel`, потому что исключение повторно пробрасывается из функции билдера.
 
 
-
 ## supervisorScope билдер
+
+Билдер создает новый _scope_ с `SupervisorJob`. 
+
+Ключевые особенности:
+- если одна из дочерних корутин падает с исключением, другие корутины не отменяются
+- дочерние корутины становятся верхнеуровневыми (можно настроить `CoroutineExceptionHandler`)
+- наследует контекст из вызывающей корутины и поддерживает структурную конкурентность (также как `coroutineScope`)
+- не распространяет исключения из дочерних корутин, вместо этого пробрасывает (re-throw) исключения (также как `coroutineScope`)
+
+Соответственно, если наш первый запрос падает, мы все еще можем получить данные из второго `async` запроса, так как он не будет отменен.
+
+Эта особенность требует обработчика `CoroutineExceptionHandler` в верхнеуровневой корутине, иначе `supervisorScope` все равно упадет.
+Причина этого в механизме, который обсуждали выше - _scope_ всегда проверяет установлен ли обработчик ошибок. Если обработчика нет - будет падение.
+
+
+```kotlin
+suspend fun getNecessaryData(): List<DisplayModel> = supervisorScope {
+     val failingDataDeferred = async(exceptionHandler) { apiService.getFailingData() }
+     val successDataDeferred = async(exceptionHandler) { apiService.getData() }
+     
+     failingDataDeferred.await().plus(successDataDeferred.await())
+        .map(DisplayModel::fromResponse)
+}
+```
+
+К сожалениею, если запустить этот код, `ViewModel` все еще перехватывает исключение.
+Почему так?
+
+## Верхнеуровневый async
+
+В соответствии со второй особенностью `supervisorScope`, обе корутины запускаемые через `async` становятся верхнеуровневыми, которые обрабатывают исключения по-другом, чем вложенные `async`:
+
+`async` верхнего уровня скрывает обработку исключения в объекте `Deffered`, который возвращает билдер. Объект выбрасывает нормальное исключение только при вызове метода `await()`
+
+## Обычные исключения в supervisorScope
+
+В документации есть следующее:
+"Сбой в _scope_ (исключение выбрасывается в блоке или на этапе отмены) приводит к сбою всего _scope_ со всеми дочерними корутинами"
+
+In our scenario, the exception is thrown when we call failingDataDeffered.await(). It happens outside of the async builder, so it isn't propagated to supervisorScope, but is thrown as a normal exception. The whole supervisorScope immediately fails and re-throws the exception.
+
+
+
+
 
 
 
