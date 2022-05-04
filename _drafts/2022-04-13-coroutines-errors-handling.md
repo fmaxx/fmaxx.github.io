@@ -196,16 +196,89 @@ suspend fun getNecessaryData(): List<DisplayModel> = supervisorScope {
 ## Обычные исключения в supervisorScope
 
 В документации есть следующее:
-"Сбой в _scope_ (исключение выбрасывается в блоке или на этапе отмены) приводит к сбою всего _scope_ со всеми дочерними корутинами"
+"Сбой в _scope_ (исключение выбрасывается в блоке или на этапе отмены) приводит к сбою всего _scope_ со всеми дочерними корутинами".
 
-In our scenario, the exception is thrown when we call failingDataDeffered.await(). It happens outside of the async builder, so it isn't propagated to supervisorScope, but is thrown as a normal exception. The whole supervisorScope immediately fails and re-throws the exception.
+В нашем сценарии, исключение выбрасывается при вызове `ailingDataDeffered.await()`. Это происходит вне билдера `async`, таким образом это не распространяется в `supervisorScope`, а выбрасывается как обычное исключение. Весь `supervisorScope` немедленно падает и пробрасывает это исключение.
 
+Чтобы избежать этой проблемы, мы можем использовать `launch` решение, которое будет правильно распространять исключение в `supervisorScope` и вторая кортуна будет оставаться живой.
 
+```kotlin
+suspend fun getNecessaryData(): List<DisplayModel> = supervisorScope {
+   buildList {
+        launch(exceptionHandler) { apiService.getFailingData() }.join()
+        launch(exceptionHandler) { apiService.getData() }.join()
+    }.map(DisplayModel::fromResponse)
+}
+```
 
+Короткая заметка: вызов `join()` тут нужен, потому что он приостанавливает корутину в которой работает. Благодаря этому метод `getNecessaryData` не вернет управление пока обе `Job` не будут завершены. В противном случае метод вернет управление сразу без всяких данных.
 
+## CancellationException
 
+В последней части статьи, я бы хотел рассказать об исключении `CancellationException`, которое используется в механизме _Structured Concurrency_ как сигнал отмены в корутинах. Это исключение передается всем корутинам внутри _scope_ при его отмене (к примеру, если пользователь ушел с экрана) или если другая корутина падает.
 
+Очень часто мы ненароком ломаем этот механизм, используя такой подход, чтобы обернуть корутины:
 
+```kotlin
+private suspend fun fetchData(action: suspend () -> T) =
+    try {
+       liveData.postValue(ViewState.Success(action()))
+    } catch (e: Exception) {
+       liveData.postValue(ViewState.Error(e))
+    }
+```
+
+Это работает ок, если есть такой вызов для каждой корутины (Я также использовал подобный подход выше). 
+
+Однако, если есть несколько корутин внутри другой у нас могут быть неприятности, потому что мы 
+перехватываем `CancellationException` самостоятельно и тем самым ломаем внутренний механизм отмены корутин.
+
+Например, мы вызываем для загрузки данных следующее:
+
+```kotlin
+viewModelScope.launch {
+    fetchData { someApi.request1() }
+    fetchData { someApi.request2() }
+}
+```
+
+`launch` запускает задачи последовательно по своей природе, это значит, что второй вызов `fetchData` ждет пока не выполнится первый вызов.
+
+Если пользователь уходит с экрана до того момента, как `request1` заканчивается, `viewModelScope` будет отменен и первый вызов `fetchData` перехватит и обработает `CancellationException`.
+
+После этого, корутина продолжит свою работу и запустит `request2` как ни в чем не бывало, потому что мы скрыли `CancellationException` от нее.
+
+Это лишняя трата ресурсов, которая может привести также к утечки памяти или даже падению приложения.
+
+Чтобы это предотвратить, мы можем улучшить метод `fetchData`, чтообы повторно пробрасывать `CancellationException`. Таким образом вся родительская корутина будет отменена правильно:
+
+```kotlin
+private suspend fun fetchData(action: suspend () -> T) =
+    try {
+        liveData.postValue(ViewState.Success(action()))
+    } catch (e: Exception) {
+        liveData.postValue(ViewState.Error(e))
+        if (e is CancellationException) {
+            throw e
+        }
+    }
+```
+
+Также помним об удобном операторе `kotlin.Result`: 
+
+```kotlin
+private suspend fun runDataFetch(action: suspend () -> T) =
+    kotlin.runCatching { action() }
+        .onSuccess { liveData.postValue(ViewState.Success(it) }
+        .onFailure {
+            liveData.postValue(ViewState.Error(it))
+            if (it is CancellationException) {
+                throw it
+            }
+        }
+```
+
+Это безопасный проброс конкретного исключения - мы можем быть уверенны, корутина обработает его правильно.
 
 
 
