@@ -186,6 +186,35 @@ topLevelScope.launch(coroutineExceptionHandler) {
 
 ## Ключевая особенность #3
 
+Используйте `try-catch` если вы хотите как-то восстановиться (повтор или другие операции), до того как корутина закончится. Помните, что перехваченное исключение не распространяется выше по иерархии корутин и функционал отмены для _Structured Concurrency_ не работает в этом случае. `CoroutineExceptionHandler` применяйте для логики работающей после того, как корутина завершена.
+
+## launch{} vs async{}
+
+До этого момента, мы использовали только билдер-функцию `launch` для запуска новых корутин. Однако, обработка исключений немного отличается между корутинами запущенными через `launch` и `async`. Посмотрите на следующий пример:
+
+```kotlin
+fun main() {
+
+    val topLevelScope = CoroutineScope(SupervisorJob())
+
+    topLevelScope.async {
+        throw RuntimeException("RuntimeException in async coroutine")
+    }
+
+    Thread.sleep(100)
+}
+
+// No output
+```
+
+В этом примере воообще ничего не выводится. Что же здесь происходит с `RuntimeException`? Исключение игнорируется? Нет. В корутинах запущенных через `async` , необработанные исключения также немедленно распространяются вверх по иерархии корутин. Но в отличие от `launch`, исключения не обрабатываются установленным `CoroutineExceptionHandler` и не передаются в обработчик потока для необработанных исключений.
+
+
+
+
+The return type of a Coroutine started with launch is Job, which is simply a representation of the Coroutine without a return value. If we need some result from a Coroutine, we have to use async, which returns a Deferred, which is a special kind of Job that additionally holds a result value. If the async Coroutine fails, the exception is encapsulated in the Deferred return type, and is re-thrown when we call the suspend function .await() to retrieve the result value on it.
+
+
 
 
 
