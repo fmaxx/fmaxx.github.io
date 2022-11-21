@@ -76,19 +76,107 @@ public static final Object functionA(@NotNull Continuation $completion) {
 <br/>
 
 ## **2. CPS — Continuation Passing Style**
+Представим suspend функцию с _n_ аргументами (_p_1, p_2... p_n_) и возвращаемым результатом `T`. После CSP трансформации к suspend функции добавляется аргумент _p_n+1_ с типом `Continuation<T>` и возвращаемый результат становится `Any?` потому что:
+
+- если функция возвращает какой-то результат, мы получаем `T`;
+- если функция приостановилась, она вернет специальный сигнал `COROUTINE_SUSPENDED` - функция в suspended состоянии.
+
+![CPS — Continuation Passing Style](/images/design_coroutines/4.jpeg)
+
+<br/>
+
+## **3. Принцип Kotlin корутины**
+
+Давайте посмотрим как создать корутину на конкретном примере и разберем ход ее работы.
+
+```kotlin
+class MainActivity : AppCompatActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+        lifecycleScope.launch {
+            val randomNum = getRandomNum() // suspension point #1
+            val sqrt = getSqrt(randomNum.toDouble()) // suspension point #2
+            log(sqrt.toString())
+        }
+    }
+
+    private suspend fun getRandomNum(): Int {
+        delay(1000)
+        return (1..1000).shuffled().first()
+    }
+
+    private suspend fun getSqrt(num: Double): Double {
+        delay(2000)
+        return sqrt(num)
+    }
+
+    private fun log(text: String) {
+        Log.i(this@MainActivity::class.simpleName, text)
+    }
+}
+```
+В этом примере у на две suspend функции. `getRandomNum()` функция возвращает случайное число от 1 до 1000. `getSqrt()` расчитывает квадратный корень. 
+
+Поставим точку останова на линии 6 (`lifecycleScope.launch...`) и запустим в режиме отладки. Посмотрим трассировку стеков до запуска корутины.
+
+![line 6 breakpoint](/images/design_coroutines/5.jpeg)
+
+<br/>
+
+Трассировка должна выглядеть примерно так:
+
+```
+invokeSuspend:75, MainActivity$startCoroutine$1 (me.aleksandarzekovic.exploringcoroutines)
+resumeWith:33, BaseContinuationImpl (kotlin.coroutines.jvm.internal)
+resumeCancellableWith:266, DispatchedContinuationKt (kotlinx.coroutines.internal)
+startCoroutineCancellable:30, CancellableKt (kotlinx.coroutines.intrinsics)
+startCoroutineCancellable$default:25, CancellableKt (kotlinx.coroutines.intrinsics)
+invoke:110, CoroutineStart (kotlinx.coroutines)
+start:126, AbstractCoroutine (kotlinx.coroutines)
+launch:56, BuildersKt__Builders_commonKt (kotlinx.coroutines)
+launch:1, BuildersKt (kotlinx.coroutines)
+launch$default:47, BuildersKt__Builders_commonKt (kotlinx.coroutines)
+launch$default:1, BuildersKt (kotlinx.coroutines)
+startCoroutine:75, MainActivity (me.aleksandarzekovic.exploringcoroutines)
+onCreate:71, MainActivity (me.aleksandarzekovic.exploringcoroutines)
+...
+```
+
+<br/>
+
+Порядок выполнения:
+
+![порядок выполнения](/images/design_coroutines/6.jpeg)
 
 
+<br/>
 
+## **3.1 Конструирование корутин**
 
+# 3.1.1 launch()
 
+![launch](/images/design_coroutines/7.jpeg)
 
+Запускает новую корутину без блокировки текущего потока и возвращает ссылку на корутину [`Job`](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-job/){:target="_blank"}.
 
+<br/>
 
-
-
-
-
-
+```kotlin
+public fun CoroutineScope.launch(
+    context: CoroutineContext = EmptyCoroutineContext,
+    start: CoroutineStart = CoroutineStart.DEFAULT,
+    block: suspend CoroutineScope.() -> Unit
+): Job {
+    val newContext = newCoroutineContext(context)
+    val coroutine = if (start.isLazy)
+        LazyStandaloneCoroutine(newContext, block) else
+        StandaloneCoroutine(newContext, active = true)
+    coroutine.start(start, coroutine, block)
+    return coroutine
+}
+```
 
 
 
