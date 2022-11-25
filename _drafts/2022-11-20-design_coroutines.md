@@ -279,7 +279,7 @@ void resumeWith(Object result) {
 
 # **Continuation**
 
-> Интерфейс "объекта-продолжения" работы после точки приостановки, которая возвращает значение **T**.
+> Интерфейс "продолжение" для возобновления работы после точки приостановки, которая возвращает значение **T**.
 
 ```kotlin
 public interface Continuation<in T> {
@@ -288,3 +288,63 @@ public interface Continuation<in T> {
 }
 view raw
 ```
+
+Continuation объекты также важны, они дают возможность продолжить работу корутины. Каждая suspend функция связана с сгенерированным экземпляром `Continuation`, который обрабатывает приостановку. 
+
+* _context_ - контекст корутины, соответствует текущему Continuation;
+
+- _resumeWith()_ - используется для передачи результатов между точками приостановки. Вызывается с результатом (или исключением) последней точки приостановки и возобновляет работу корутины.
+
+<br/>
+
+# **BaseContinuationImpl**
+
+Ключевой код `BaseContinuationImpl`:
+
+```kotlin
+internal abstract  class  BaseContinuationImpl (...) {
+     // Implement resumeWith of Continuation
+     // It is final and cannot be overridden!
+    public  final override fun resumeWith (result: Result<Any?>) {
+        // ...
+        val  outcome  = invokeSuspend(param)
+        // ...
+    }
+    // For implementation 
+    protected abstract fun invokeSuspend (result: Result<Any?>) : Any?
+}
+```
+
+`invokeSuspend()` - абстрактный метод, реализующий в корутине класс-тело при компиляции.
+
+Метод `resumeWith()` всегда вызывает `invokeSuspend()`.
+
+<br/>
+
+# **ContinuationImpl**
+`ContinuationImpl` наследуется от `BaseContinuationImpl`. Его задача генерировать объект `DispatchedContinuation` с помощью перехватчика, который также является `Continuation`. Мы поговорим подробнее об этом в разделе **3.2.4**.
+
+Давайте продолжим анализировать тело функции `launch()`:
+
+![launch()](/images/design_coroutines/11.webp)
+
+<br/>
+
+# **newCoroutineContext()**
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
