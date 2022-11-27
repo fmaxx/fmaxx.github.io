@@ -332,10 +332,34 @@ internal abstract  class  BaseContinuationImpl (...) {
 
 # **newCoroutineContext()**
 
+`newCoroutineContext` - создает контекст для новой корутины. Контекст создается по-умолчаню с [`Dispatchers.Default`](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-dispatchers/-default.html){:target="_blank"}, если не указаны другие или [`ContinuationInterceptor`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/-continuation-interceptor/index.html){:target="_blank"}, также добавляет опционально подддежку отладки (если она включена) и копируемые thread-local средства JVM.
+
+`newCoroutineContext()` - это функция-расширение CoroutineScope. Ее назначение это образование нового контекста из родительского (из CoroutineScope) и контекста, переданного как аргумент.
+
+![ух я потерялся](/images/design_coroutines/12.webp)
+
+Давайте вкратце посмотрим на `CoroutineContext`.
+
+<br/>
+
+# **CoroutineContext**
+
+CoroutineContext это неизменяемое индексированное множество _Element_, таких как [`CoroutineName`](https://www.google.com/search?client=safari&rls=en&q=Coroutinename&ie=UTF-8&oe=UTF-8){:target="_blank"}, `CoroutineId`, [`CoroutineExceptionHandler`](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-exception-handler/){:target="_blank"}, [`ContinuationIntercepter`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/-continuation-interceptor/){:target="_blank"}, [`CoroutineDispatcher`](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-dispatcher/){:target="_blank"}, [`Job`](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-job/){:target="_blank"}. Каждый элемент этого множества имеет уникальный ключ `Key`.
 
 
+Представьте, что мы хотим контролировать на каком потоке или пуле потоков будет выполняться корутина. В зависимости от того, хотим ли мы запустить задачу на главном потоке, связанную с интенсивными вычислениям или операциями ввода/вывода (IO) мы будем использовать разные типы `dispatchers` (диспетчера).
 
+`Dispatchers` - планировщики потоков работающие с корутинами, используются чтобы переключать потоки и определять группу потоков на которых работает корутина. Есть четыре вида диспетчеров:
 
+* [**Dispatchers.Default**](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-dispatchers/-default.html){:target="_blank"}.
+
+* [**Dispatchers.IO**](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-dispatchers/-i-o.html){:target="_blank"}.
+
+* [**Dispatchers.Main**](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-dispatchers/-main.html){:target="_blank"}.
+
+* [**Dispatchers.Unconfined**](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-dispatchers/-unconfined.html){:target="_blank"}.
+
+Все эти диспетчеры являются `CoroutineDispatcher`. Как мы говорили выше, `CoroutineDispatcher` один из элементов `CoroutineContext`, а значит все эти диспетчеры также элементы `CoroutineContext`.
 
 
 
