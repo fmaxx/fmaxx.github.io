@@ -361,13 +361,77 @@ CoroutineContext это неизменяемое индексированное 
 
 Все эти диспетчеры являются `CoroutineDispatcher`. Как мы говорили выше, `CoroutineDispatcher` один из элементов `CoroutineContext`, а значит все эти диспетчеры также элементы `CoroutineContext`.
 
+Мы говорили, что `CoroutineContext` похож на коллекцию и эта коллекция может содержать разные типы `Element`. Мы можем создать новый контекст добавляя/удаляя элементы или через слияние двух контекстов. Оператор [_plus_](http://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/-coroutine-context/plus.html){:target="_blank"} работает как расширение [_Set.plus_](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.collections/plus.html){:target="_blank"}, он возвращает комбинацию из двух контекстов, где элементы правой части, заменяются на элементы с такими же ключами из левой части.
+
+Экземпляр `EmptyCoroutineContext` создает контекст без элементов.
+
+<br/>
+
+![примеры](/images/design_coroutines/13.webp)
+
+<br/>
+
+Пример 1:
+```kotlin
+import kotlinx.coroutines.*
+
+fun main() {
+    val coroutineName = CoroutineName("C#1") + CoroutineName("C#2")
+    println(coroutineName)
+}
+
+// result
+// CoroutineName(C#2)
+```
+
+Пример 2:
+```kotlin
+import kotlinx.coroutines.*
+
+fun main() {
+    val coroutineContext = CoroutineName("C#1") + Dispatchers.Default
+    println(coroutineContext)
+}
+
+// result
+// [CoroutineName(C#1), Dispatchers.Default]
+```
+
+Пример 3:
+```kotlin
+import kotlinx.coroutines.*
+
+fun main() {
+    val firstCoroutineContext = CoroutineName("C#1") + Dispatchers.Default
+    println(firstCoroutineContext)
+    
+    val secondCoroutineContext = Job() + Dispatchers.IO
+    println(secondCoroutineContext)
+    
+    val finalCoroutineContext = firstCoroutineContext + secondCoroutineContext
+    println(finalCoroutineContext)
+}
+
+// result
+// [CoroutineName(C#1), Dispatchers.Default]
+// [JobImpl{Active}@39a054a5, Dispatchers.IO]
+// [CoroutineName(C#1), JobImpl{Active}@39a054a5, Dispatchers.IO]
+```
+
+![примеры](/images/design_coroutines/14.webp)
 
 
+`CoroutineContext` никогда не переопределяется, а объединяется с существующим. Теперь, когда мы узнали несколько вещей о `CoroutineContext`, мы можем вернутся немного назад, туда где остановились с `newCoroutineContext` в билдер-функции `launch`.
 
+<br/>
 
+Давайте определим различные контексты чтобы легче все понимать:
 
+* **_scope context_** - контекст определенный в `CoroutineScope`
 
+* **_passed context_** - экземпляр `CoroutineContext`, полученный как первый аргумент в билдер-функции
 
+* **_parent context_** - suspend блок в билдер-функции имеет получателя `CoroutineScope`, который также предоставляет `CoroutineContext`. Этот контекст не новый контекст!
 
 
 
