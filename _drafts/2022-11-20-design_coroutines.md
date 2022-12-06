@@ -431,7 +431,47 @@ fun main() {
 
 * **_passed context_** - экземпляр `CoroutineContext`, полученный как первый аргумент в билдер-функции
 
-* **_parent context_** - suspend блок в билдер-функции имеет получателя `CoroutineScope`, который также предоставляет `CoroutineContext`. Этот контекст не новый контекст!
+* **_parent context_** - suspend блок в билдер-функции имеет получателя `CoroutineScope`, который также предоставляет `CoroutineContext`. Этот контекст не новый контекст корутины!
+
+![scope](/images/design_coroutines/15.webp)
+
+* Новая корутина создает собственный дочерний экземпляр `Job` (используя `Job` из этого контекста как родительскую) и определяет свой контекст корутины (дочерний контекст) как родительский плюс свой `Job`. Мы рассмотрим детально, как это делается, чуть позже.
+
+
+После определения контекста новой корутины (из родительского контекста), ее можно создавать.
+
+![coroutine code](/images/design_coroutines/16.webp)
+
+<br/>
+
+# **CoroutineContext**
+
+Мы используем новый (родительский) контекст для создания корутины. Аргумент `start` по умолчанию равен `CoroutineStart.DEFAULT`. В этом случае, мы создаем `StandaloneCoroutine` (наследуется от `AbstractCoroutine`) с возвращаемым типом [_Job_](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-job/){:target="_blank"}. `StandaloneCoroutine` это экземпляр корутины.
+
+> Если мы установим ленивый запуск, то у нас будет экземпляр `LazyStandaloneCoroutine`, который наследуется от `StandaloneCoroutine` и в конечном итоге от `AbstractCoroutine`.
+
+```kotlin
+private open class StandaloneCoroutine(
+    parentContext: CoroutineContext,
+    active: Boolean
+) : AbstractCoroutine<Unit>(parentContext, initParentJob = true, active = active) {
+    override fun handleJobException(exception: Throwable): Boolean {
+        handleCoroutineException(context, exception)
+        return true
+    }
+}
+```
+
+
+
+
+
+
+
+
+
+
+
 
 
 
