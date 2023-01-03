@@ -444,9 +444,9 @@ fun main() {
 
 <br/>
 
-# **CoroutineContext**
+# **StandaloneCoroutine**
 
-Мы используем новый (родительский) контекст для создания корутины. Аргумент `start` по умолчанию равен `CoroutineStart.DEFAULT`. В этом случае, мы создаем `StandaloneCoroutine` (наследуется от `AbstractCoroutine`) с возвращаемым типом [_Job_](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-job/){:target="_blank"}. `StandaloneCoroutine` это экземпляр корутины.
+Мы используем новый (родительский) контекст для создания корутины. Аргумент `start` по умолчанию равен `CoroutineStart.DEFAULT`. В этом случае мы создаем `StandaloneCoroutine` (наследуется от `AbstractCoroutine`) с возвращаемым типом [_Job_](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-job/){:target="_blank"}. `StandaloneCoroutine` это экземпляр корутины.
 
 > Если мы установим ленивый запуск, то у нас будет экземпляр `LazyStandaloneCoroutine`, который наследуется от `StandaloneCoroutine` и в конечном итоге от `AbstractCoroutine`.
 
@@ -461,17 +461,133 @@ private open class StandaloneCoroutine(
     }
 }
 ```
+<br/>
+Единственный метод который переопределяется в `StandaloneCoroutine` это `handleJobException` для обработки исключений не перехваченных родительской корутиной. Метод `start` относится к родительскому классу `AbstractCoroutine` здесь:
+
+```kotlin
+@InternalCoroutinesApi
+public abstract class AbstractCoroutine<in T>(
+    parentContext: CoroutineContext,
+    initParentJob: Boolean,
+    active: Boolean
+) : JobSupport(active), Job, Continuation<T>, CoroutineScope {
+  
+  // ...
+  
+  public fun <R> start(start: CoroutineStart, receiver: R, block: suspend R.() -> T) {
+      start(block, receiver, this)
+  }
+  
+  // ...
+}
+``` 
+
+<br/>
+
+`AbstractCoroutine` наследуется от классов `JobSupport`, `Job` а также реализует интерфейсы `Continuation` и `CoroutineScope`. Класс `AbstractCoroutine` в основном отвечает за возобновление корутины и получение результатов. 
+
+![AbstractCoroutine](/images/design_coroutines/17.webp)
+
+
+# **JobSupport**
+
+`JobSupport` особая реализация `Job`. `AbstractCoroutine` может быть использована как `Job` для управления жизненным циклом корутины, также `AbstractCoroutine` может поддерживать интерфейс `Continuation` и использоваться как объект `Continuation`.
+
+# **Job**
+Контекст `AbstractCoroutine` - это контекст, который мы передаем как параметер (`parentContext`) плюс текущая корутина, и так как известно, что `AbstractCoroutine` это и `Job` и `CoroutineScope`, становится ясно, что контекст нашей корутины содержит элемент `Job`. Этот контекст является **контекстом корутины (дочерний контекст)**.
+
+```kotlin
+@InternalCoroutinesApi
+public abstract class AbstractCoroutine<in T>(
+    parentContext: CoroutineContext,
+    initParentJob: Boolean,
+    active: Boolean
+) : JobSupport(active), Job, Continuation<T>, CoroutineScope {
+
+    // ...
+
+    /**
+     * The context of this coroutine that includes this coroutine as a [Job].
+     */
+    @Suppress("LeakingThis")
+    public final override val context: CoroutineContext = parentContext + this
+    
+    // ...
+}
+``` 
+
+
+![Scopes](/images/design_coroutines/18.webp)
+
+Второй шаг в стеке вызовов это `coroutine.start(start, coroutine, block)`.
 
 
 
+# **3.2.2 start()**
+
+![start()](/images/design_coroutines/19.webp)
+
+> Запускает корутину в данным блоком кода и стратегией запуска. Метод вызывается однократно в данной корутине.
+
+<br/>
+
+```kotlin
+@InternalCoroutinesApi
+public abstract class AbstractCoroutine<in T>(
+    parentContext: CoroutineContext,
+    initParentJob: Boolean,
+    active: Boolean
+) : JobSupport(active), Job, Continuation<T>, CoroutineScope {
+  
+  // ...
+  
+  public fun <R> start(start: CoroutineStart, receiver: R, block: suspend R.() -> T) {
+      start(block, receiver, this)
+  }
+  
+  // ...
+}
+``` 
+
+<br/>
 
 
+`AbstractCoroutine.start()` вызывает переопределенный метод `invoke()` перечисления `CoroutineStart`. 
 
 
+# **3.2.3 invoke()**
+
+![invoke()](/images/design_coroutines/20.webp)
+
+> Определяет опции запуска для функций-билдеров корутины. Используется как параметр `start`, в `launch, async` и других билдерах.
+
+<br/>
+
+```kotlin
+@InternalCoroutinesApi
+public operator fun <T> invoke(block: suspend () -> T, completion: Continuation<T>): Unit =
+    when (this) {
+        DEFAULT -> block.startCoroutineCancellable(completion)
+        ATOMIC -> block.startCoroutine(completion)
+        UNDISPATCHED -> block.startCoroutineUndispatched(completion)
+        LAZY -> Unit // will start lazily
+}
+``` 
+
+<br/>
+
+`CoroutineStart` имеет четыре перечисления:
+
+* [**DEFAULT**](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-start/-d-e-f-a-u-l-t/){:target="_blank"} - немедленно планирует запуск корутины в соотвествии с контекстом
+
+* [**LAZY**](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-start/-l-a-z-y/){:target="_blank"} - ленивый запуск корутины, только если это необходимо
+
+* [**ATOMIC**](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-start/-a-t-o-m-i-c/){:target="_blank"} - планирует запуск корутины атомарно (без возможности отменить) в соответствии с контекстом
+
+* [**UNDISPATCHED**](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-start/-u-n-d-i-s-p-a-t-c-h-e-d/){:target="_blank"} - немедленно выполняет корутину на текущем потоке до ее первой точки приостановки.
 
 
-
-
+# **3.2.4. startCoroutineCancellable()**
 
 
 
