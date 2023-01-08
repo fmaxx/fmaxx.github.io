@@ -586,8 +586,167 @@ public operator fun <T> invoke(block: suspend () -> T, completion: Continuation<
 
 * [**UNDISPATCHED**](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines/-coroutine-start/-u-n-d-i-s-p-a-t-c-h-e-d/){:target="_blank"} - немедленно выполняет корутину на текущем потоке до ее первой точки приостановки.
 
+Здесь используется DEFAULT как пример.
 
 # **3.2.4. startCoroutineCancellable()**
+
+![startCoroutineCancellable()](/images/design_coroutines/21.webp)
+
+> Метод используется для запуска корутины с отменой. Отмена работы корутины возможна пока она ожидает запуск. 
+
+<br/>
+
+```kotlin
+/**
+ * param completion is AbstractCoroutine
+ * return a Continuation
+ */
+internal fun <R , T> (suspend ( R ) -> T).startCoroutineCancellable(receiver: R, completion: Continuation<T>) =   
+  runSafely(completion) {   
+      createCoroutineUnintercepted(receiver, completion).intercepted().resumeCancellableWith(Result.success(Unit))   
+  }
+``` 
+
+<br/>
+
+> **runSafely()** запускает блок кода и завершает его выполнение, если возникло исключение. Смысл в следующем: `startCoroutineCancellable()` вызывается, когда мы собираемся запустить корутину асинхронно в ее собственном диспетчере. Таким образом если диспетчер кидает исключение во время запуска корутины, корутина никогда не завершится, поэтому мы должны обработать это исключение и возобновить объкет `completion`.
+
+<br/>
+
+```kotlin
+private inline fun runSafely(completion: Continuation<*>, block: () -> Unit) {
+    try {
+        block()
+    } catch (e: Throwable) {
+        completion.resumeWith(Result.failure(e))
+    }
+}
+```
+<br/>
+Метод `startCoroutineCancellable` создает цепочку вызовов. Давайте пройдемся по ней:
+
+1 **createCoroutineUnintercepted()** - функция-расширение, вызываемая в теле корутины, а тело корутины это подкласс `SuspendLambda` и значит `BaseContinuationImpl`.
+
+```kotlin
+// kotlin/libraries/stdlib/jvm/src/kotlin/coroutines/intrinsics/IntrinsicsJvm.kt
+
+@SinceKotlin("1.3")
+public actual fun <R, T> (suspend R.() -> T).createCoroutineUnintercepted(
+    receiver: R,
+    completion: Continuation<T>
+): Continuation<Unit> {
+    val probeCompletion = probeCoroutineCreated(completion)
+    return if (this is BaseContinuationImpl)
+        create(receiver, probeCompletion)
+    else {
+        createCoroutineFromSuspendFunction(probeCompletion) {
+            (this as Function2<R, Continuation<T>, Any?>).invoke(receiver, it)
+        }
+    }
+}
+``` 
+
+<br/>
+
+Метод `create()` создает экземпляр тела корутины и здесь мы получаем экземпляр класса корутины.
+
+```kotlin
+@NotNull
+ public final Continuation create(@Nullable Object value, @NotNull Continuation completion) {
+    Intrinsics.checkNotNullParameter(completion, "completion");
+    Function2 var3 = new <anonymous constructor>(completion);
+    return var3;
+ }
+``` 
+
+<br/>
+
+2 **intercepted()** - перехватывает _continuation_ объект с помощью [`ContinuationInterceptor`](https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.coroutines/-continuation-interceptor/index.html){:target="_blank"}.
+
+```kotlin
+public actual fun <T> Continuation<T>.intercepted(): Continuation<T> =
+    (this as? ContinuationImpl)?.intercepted() ?: this
+``` 
+
+<br/>
+
+Ниже пример тела корутины, который наследуется от ContinuationImpl:
+
+```kotlin
+public fun intercepted(): Continuation<Any?> =
+    intercepted
+      ?: (context[ContinuationInterceptor]?.interceptContinuation(this) ?: this)
+                .also { intercepted = it }
+``` 
+
+<br/>
+
+Если `intercepted` объект нулевой, то перехватчик берется из контекста и возвращается объект `Continuation`.
+
+**context[ContinuationInterceptor]** - берет планировщик из коллекции и вызывает `interceptContinuation()`.
+Метод `interceptContinuation()` используется чтобы обернуть тело корутины `Continuation` в `DispatchedContinuation`.
+
+<br/>
+
+Ниже пример тела корутины, который наследуется от ContinuationImpl:
+
+```kotlin
+// CoroutineDispatcher
+
+public final override fun <T> interceptContinuation(continuation: Continuation<T>): Continuation<T> 
+  = DispatchedContinuation(this, continuation)
+``` 
+
+<br/>
+
+
+# **DispatchedContinuation**
+
+`DispatchedContinuation` представляется собой объект `Continuation` из тела корутины и хранит планировщик потоков. Функция `DispatchedContinuation` - использовать планировщик потоков для выполнения тела корутины на выбранном потоке.
+
+Обратите внимание, класс принимает как аргументы в конструкторе, объекты планировщика и _continuation_ и реализует оба интерфейса `Continuation<T>` и `DispatchedTask<T>`.
+
+3 **resumeCancellableWith()** - функция-расширение класса `Continuation`.
+
+```kotlin
+@InternalCoroutinesApi
+public fun <T> Continuation<T>.resumeCancellableWith(
+    result: Result<T>,
+    onCancellation: ((cause: Throwable) -> Unit)? = null
+): Unit = when (this) {
+    is DispatchedContinuation -> resumeCancellableWith(result, onCancellation)
+    else -> resumeWith(result)
+}
+``` 
+
+Если тело корутины было перехвачено и обернуто в `DispatchedContinuation` объект, то вызывается `resumeCancellableWith(result, onCancellation)`. В противном случае будет запущен метод `resumeWith(result)`.
+
+
+```kotlin
+inline fun resumeCancellableWith(
+        result: Result<T>,
+        noinline onCancellation: ((cause: Throwable) -> Unit)?
+    ) {
+        val state = result.toState(onCancellation)
+        if (dispatcher.isDispatchNeeded(context)) {
+            _state = state
+            resumeMode = MODE_CANCELLABLE
+            dispatcher.dispatch(context, this)
+        } else {
+            executeUnconfined(state, MODE_CANCELLABLE) {
+                if (!resumeCancelled(state)) {
+                    resumeUndispatchedWith(result)
+                }
+            }
+        }
+    }
+``` 
+
+<br/>
+
+
+
+
 
 
 
